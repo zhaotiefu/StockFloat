@@ -72,8 +72,8 @@
   border: 0;
   background: transparent;
   color: #9fb2c9;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
@@ -81,6 +81,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  z-index: 2;
 }
 
 .sf-btn:hover {

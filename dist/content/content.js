@@ -315,6 +315,9 @@
     bindPanel() {
       this.root.querySelectorAll("[data-action]").forEach((el) => {
         const action = el.getAttribute("data-action");
+        el.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
         if (action === "opacity") {
           el.addEventListener("input", (e) => {
             const value = Number(e.target.value);
@@ -330,6 +333,7 @@
           return;
         }
         el.addEventListener("click", (e) => {
+          e.preventDefault();
           e.stopPropagation();
           if (action === "toggle-settings") {
             this.settingsOpen = !this.settingsOpen;
@@ -348,7 +352,7 @@
       const pe = e;
       const target = pe.target;
       if (!target) return;
-      if (target.closest("button, input, .sf-row")) return;
+      if (target.closest("button, input, .sf-row, .sf-actions")) return;
       const dragHandle = target.closest("[data-drag='1'], .sf-header, .sf-mini");
       if (!dragHandle) return;
       this.beginDrag(pe);

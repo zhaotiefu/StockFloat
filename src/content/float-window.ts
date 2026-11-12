@@ -223,6 +223,10 @@ export class FloatWindow {
   private bindPanel(): void {
     this.root.querySelectorAll("[data-action]").forEach((el) => {
       const action = el.getAttribute("data-action");
+      // Keep header dragging from stealing button interactions.
+      el.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
       if (action === "opacity") {
         el.addEventListener("input", (e) => {
           const value = Number((e.target as HTMLInputElement).value);
@@ -238,6 +242,7 @@ export class FloatWindow {
         return;
       }
       el.addEventListener("click", (e) => {
+        e.preventDefault();
         e.stopPropagation();
         if (action === "toggle-settings") {
           this.settingsOpen = !this.settingsOpen;
@@ -257,7 +262,7 @@ export class FloatWindow {
     const pe = e as PointerEvent;
     const target = pe.target as HTMLElement | null;
     if (!target) return;
-    if (target.closest("button, input, .sf-row")) return;
+    if (target.closest("button, input, .sf-row, .sf-actions")) return;
     const dragHandle = target.closest("[data-drag='1'], .sf-header, .sf-mini");
     if (!dragHandle) return;
     this.beginDrag(pe);
