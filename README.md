@@ -31,10 +31,23 @@ npm run typecheck
 
 ## 安装（Chrome）
 
+### 方式 A：加载未打包目录（开发推荐）
+
 1. 打开 `chrome://extensions`
 2. 开启「开发者模式」
 3. 「加载已解压的扩展程序」
 4. 选择本仓库的 `dist` 目录
+
+### 方式 B：生成 `.crx`
+
+```bash
+npm run pack:crx
+```
+
+产物：`release/stock-float.crx`  
+签名密钥：`release/stock-float.pem`（本地保留，勿提交）
+
+说明：较新版 Chrome 默认限制直接拖入安装第三方 `.crx`。若无法拖入安装，请改用方式 A，或通过企业策略分发。
 
 ## 使用
 

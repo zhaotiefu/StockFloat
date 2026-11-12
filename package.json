@@ -7,7 +7,8 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "pack:crx": "npm run build && node scripts/pack-crx.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
