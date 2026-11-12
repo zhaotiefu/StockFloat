@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -79,7 +80,7 @@ func defaultData() AppData {
 	}
 }
 
-func dataPath() string {
+var dataPath = func() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "stockfloat-data.json"
@@ -130,6 +131,16 @@ func inferBoard(symbol string) (string, bool) {
 
 func providerCode(s WatchStock) string {
 	return strings.ToLower(s.Board) + s.Symbol
+}
+
+func removeSymbol(list []WatchStock, symbol string) []WatchStock {
+	next := make([]WatchStock, 0, len(list))
+	for _, item := range list {
+		if item.Symbol != symbol {
+			next = append(next, item)
+		}
+	}
+	return next
 }
 
 func decodeGBK(b []byte) string {
@@ -281,25 +292,45 @@ func (f *floatUI) requestUI() {
 	}
 }
 
+func (f *floatUI) runOnUI(fn func()) {
+	if fyne.CurrentApp() == nil {
+		fn()
+		return
+	}
+	fyne.Do(fn)
+}
+
 func (f *floatUI) rebuildList() {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	quotes := append([]Quote{}, f.quotes...)
+	watch := append([]WatchStock{}, f.data.Settings.Watchlist...)
+	showSym := f.data.Settings.ShowSymbol
+	lastErr := f.lastErr
+	updatedAt := f.updatedAt
+	listBox := f.listBox
+	statusLbl := f.statusLbl
+	timeLbl := f.timeLbl
+	f.mu.Unlock()
+	if listBox == nil || statusLbl == nil || timeLbl == nil {
+		return
+	}
+
 	items := []fyne.CanvasObject{}
 	qmap := map[string]Quote{}
-	for _, q := range f.quotes {
+	for _, q := range quotes {
 		qmap[q.Symbol] = q
 	}
-	if len(f.data.Settings.Watchlist) == 0 {
+	if len(watch) == 0 {
 		items = append(items, widget.NewLabel("尚未添加自选股票"))
 	}
-	for _, s := range f.data.Settings.Watchlist {
+	for _, s := range watch {
 		q := qmap[s.Symbol]
 		name := s.Name
 		if q.Name != "" {
 			name = q.Name
 		}
 		leftText := name
-		if f.data.Settings.ShowSymbol {
+		if showSym {
 			leftText = fmt.Sprintf("%s\n%s", name, s.Symbol)
 		}
 		price := "--"
@@ -329,18 +360,18 @@ func (f *floatUI) rebuildList() {
 		row := container.NewBorder(nil, nil, nameLbl, container.NewHBox(layout.NewSpacer(), priceLbl, widget.NewLabel("  "), chgLbl))
 		items = append(items, container.NewPadded(row))
 	}
-	f.listBox.Objects = items
-	f.listBox.Refresh()
+	listBox.Objects = items
+	listBox.Refresh()
 
-	if f.lastErr != "" {
-		f.statusLbl.SetText("更新异常")
-		f.timeLbl.SetText(f.lastErr)
+	if lastErr != "" {
+		statusLbl.SetText("更新异常")
+		timeLbl.SetText(lastErr)
 	} else {
-		f.statusLbl.SetText("自动刷新中")
-		if f.updatedAt.IsZero() {
-			f.timeLbl.SetText("--:--:--")
+		statusLbl.SetText("自动刷新中")
+		if updatedAt.IsZero() {
+			timeLbl.SetText("--:--:--")
 		} else {
-			f.timeLbl.SetText(f.updatedAt.In(time.FixedZone("CST", 8*3600)).Format("15:04:05"))
+			timeLbl.SetText(updatedAt.In(time.FixedZone("CST", 8*3600)).Format("15:04:05"))
 		}
 	}
 }
@@ -386,9 +417,9 @@ func (f *floatUI) setMinimized(v bool) {
 
 func (f *floatUI) fullContent() fyne.CanvasObject {
 	title := widget.NewLabelWithStyle("STOCK FLOAT", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	btnSettings := widget.NewButtonWithIcon("", theme.SettingsIcon(), f.openSettings)
-	btnMin := widget.NewButton("─", func() { f.setMinimized(true) })
-	btnHide := widget.NewButton("×", func() {
+	btnSettings := widget.NewButton("设置", f.openSettings)
+	btnMin := widget.NewButton("缩小", func() { f.setMinimized(true) })
+	btnHide := widget.NewButton("隐藏", func() {
 		f.win.Hide()
 		f.mu.Lock()
 		f.data.Settings.Enabled = false
@@ -402,68 +433,69 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	f.timeLbl = widget.NewLabel("--:--:--")
 	f.statusLbl = widget.NewLabel("自动刷新中")
 	footer := container.NewBorder(nil, nil, f.timeLbl, container.NewHBox(f.statusLbl, btnRefresh))
-	return container.NewBorder(container.NewPadded(header), container.NewPadded(footer), nil, nil, scroll)
+	topPad := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 0})
+	topPad.SetMinSize(fyne.NewSize(1, 8))
+	return container.NewBorder(
+		container.NewVBox(topPad, container.NewPadded(header)),
+		container.NewPadded(footer),
+		nil, nil, scroll,
+	)
 }
 
 func (f *floatUI) openSettings() {
 	if f.settingsWin != nil {
+		f.win.Hide()
 		f.settingsWin.Show()
 		f.settingsWin.RequestFocus()
 		return
 	}
+	// Hide float while editing so it does not cover settings controls.
+	f.win.Hide()
 	w := f.app.NewWindow("Stock Float 设置")
 	f.settingsWin = w
-	w.Resize(fyne.NewSize(380, 520))
+	w.Resize(fyne.NewSize(400, 640))
+	w.CenterOnScreen()
 
 	symbolEntry := widget.NewEntry()
 	symbolEntry.SetPlaceHolder("输入 6 位代码，如 601318")
 	errLbl := widget.NewLabel("")
 	errLbl.Hide()
 
-	var watchList *widget.List
-	watchList = widget.NewList(
-		func() int {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			return len(f.data.Settings.Watchlist)
-		},
-		func() fyne.CanvasObject {
-			return container.NewBorder(nil, nil, widget.NewLabel("name"), widget.NewButton("删除", nil))
-		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			if i < 0 || i >= len(f.data.Settings.Watchlist) {
-				return
-			}
-			s := f.data.Settings.Watchlist[i]
-			box := o.(*fyne.Container)
-			box.Objects[0].(*widget.Label).SetText(fmt.Sprintf("%s  %s", s.Name, s.Symbol))
-			btn := box.Objects[1].(*widget.Button)
-			idx := i
-			btn.OnTapped = func() {
-				f.mu.Lock()
-				if idx >= 0 && idx < len(f.data.Settings.Watchlist) {
-					f.data.Settings.Watchlist = append(f.data.Settings.Watchlist[:idx], f.data.Settings.Watchlist[idx+1:]...)
-					_ = saveData(f.data)
-				}
-				f.mu.Unlock()
-				watchList.Refresh()
-				f.requestUI()
-				go f.refreshQuotes()
-			}
-		},
-	)
+	watchBox := container.NewVBox()
+	var refreshWatch func()
+	refreshWatch = func() {
+		f.mu.Lock()
+		watch := append([]WatchStock{}, f.data.Settings.Watchlist...)
+		f.mu.Unlock()
+		rows := make([]fyne.CanvasObject, 0, len(watch))
+		for _, s := range watch {
+			rows = append(rows, widget.NewLabel(fmt.Sprintf("%s  %s", s.Name, s.Symbol)))
+		}
+		if len(rows) == 0 {
+			rows = append(rows, widget.NewLabel("尚未添加自选股票"))
+		}
+		watchBox.Objects = rows
+		watchBox.Refresh()
+	}
+	refreshWatch()
 
-	interval := widget.NewSelect([]string{"2", "5", "10", "30"}, func(v string) {
+	f.mu.Lock()
+	curInterval := strconv.Itoa(f.data.Settings.RefreshInterval)
+	curShowSym := f.data.Settings.ShowSymbol
+	f.mu.Unlock()
+
+	interval := widget.NewRadioGroup([]string{"2", "5", "10", "30"}, func(v string) {
+		if v == "" {
+			return
+		}
 		n, _ := strconv.Atoi(v)
 		f.mu.Lock()
 		f.data.Settings.RefreshInterval = n
 		_ = saveData(f.data)
 		f.mu.Unlock()
 	})
-	f.mu.Lock()
-	interval.SetSelected(strconv.Itoa(f.data.Settings.RefreshInterval))
+	interval.Horizontal = true
+	interval.SetSelected(curInterval)
 	showSym := widget.NewCheck("显示股票代码", func(v bool) {
 		f.mu.Lock()
 		f.data.Settings.ShowSymbol = v
@@ -471,10 +503,9 @@ func (f *floatUI) openSettings() {
 		f.mu.Unlock()
 		f.requestUI()
 	})
-	showSym.SetChecked(f.data.Settings.ShowSymbol)
-	f.mu.Unlock()
+	showSym.SetChecked(curShowSym)
 
-	addBtn := widget.NewButton("添加", func() {
+	doAdd := func() {
 		sym := strings.TrimSpace(symbolEntry.Text)
 		board, ok := inferBoard(sym)
 		if !ok {
@@ -502,9 +533,39 @@ func (f *floatUI) openSettings() {
 		f.mu.Unlock()
 		errLbl.Hide()
 		symbolEntry.SetText("")
-		watchList.Refresh()
+		refreshWatch()
+		f.requestUI()
 		go f.refreshQuotes()
-	})
+	}
+	doDelete := func() {
+		sym := strings.TrimSpace(symbolEntry.Text)
+		if _, ok := inferBoard(sym); !ok {
+			errLbl.SetText("请输入要删除的合法 6 位代码")
+			errLbl.Show()
+			return
+		}
+		f.mu.Lock()
+		before := len(f.data.Settings.Watchlist)
+		f.data.Settings.Watchlist = removeSymbol(f.data.Settings.Watchlist, sym)
+		changed := len(f.data.Settings.Watchlist) != before
+		if changed {
+			_ = saveData(f.data)
+		}
+		f.mu.Unlock()
+		if !changed {
+			errLbl.SetText("自选中没有该代码")
+			errLbl.Show()
+			return
+		}
+		errLbl.Hide()
+		symbolEntry.SetText("")
+		refreshWatch()
+		f.requestUI()
+		go f.refreshQuotes()
+	}
+	addBtn := widget.NewButton("添加", doAdd)
+	deleteBtn := widget.NewButton("删除", doDelete)
+	symbolEntry.OnSubmitted = func(string) { doAdd() }
 
 	showBtn := widget.NewButton("显示悬浮窗", func() {
 		f.mu.Lock()
@@ -513,23 +574,38 @@ func (f *floatUI) openSettings() {
 		f.mu.Unlock()
 		f.win.Show()
 		f.setMinimized(false)
+		f.win.RequestFocus()
 	})
 
+	watchScroll := container.NewVScroll(watchBox)
+	watchScroll.SetMinSize(fyne.NewSize(360, 180))
 	form := container.NewVBox(
 		widget.NewLabelWithStyle("自选股票", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewBorder(nil, nil, nil, addBtn, symbolEntry),
+		symbolEntry,
+		container.NewGridWithColumns(2, addBtn, deleteBtn),
 		errLbl,
-		container.NewGridWrap(fyne.NewSize(340, 220), watchList),
+		watchScroll,
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle("设置", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewBorder(nil, nil, widget.NewLabel("刷新间隔(秒)"), interval),
+		widget.NewLabel("刷新间隔(秒)"),
+		interval,
 		showSym,
 		showBtn,
-		widget.NewLabel("绿色便携版：配置保存在程序同目录 stockfloat-data.json"),
+		widget.NewLabel("托盘菜单可重新显示悬浮窗；配置在程序同目录 stockfloat-data.json"),
 	)
 	w.SetContent(container.NewPadded(form))
-	w.SetOnClosed(func() { f.settingsWin = nil })
+	w.SetOnClosed(func() {
+		f.settingsWin = nil
+		f.mu.Lock()
+		enabled := f.data.Settings.Enabled
+		f.mu.Unlock()
+		if enabled {
+			f.win.Show()
+			f.setMinimized(false)
+		}
+	})
 	w.Show()
+	w.RequestFocus()
 }
 
 func openDataDir() {
@@ -544,7 +620,19 @@ func openDataDir() {
 	}
 }
 
+func acquireSingleton() (net.Listener, error) {
+	// Local port lock keeps a single portable instance without platform-specific flock.
+	return net.Listen("tcp", "127.0.0.1:45917")
+}
+
 func main() {
+	lock, err := acquireSingleton()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Stock Float 已在运行")
+		os.Exit(0)
+	}
+	defer lock.Close()
+
 	a := app.NewWithID(appID)
 	a.Settings().SetTheme(&lightTheme{})
 	data := loadData()
@@ -564,7 +652,7 @@ func main() {
 
 	go func() {
 		for range ui.uiPulse {
-			ui.rebuildList()
+			ui.runOnUI(ui.rebuildList)
 		}
 	}()
 
