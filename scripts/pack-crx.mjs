@@ -14,6 +14,7 @@ import {
   createSign,
   generateKeyPairSync,
 } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -212,3 +213,15 @@ console.log("packed", crxPath);
 console.log("size", `${(crx.length / 1024).toFixed(1)} KB`);
 console.log("extension id", extensionId);
 console.log("files", files.length);
+
+// Also write an unpacked zip for "Load unpacked" installs.
+const zipPath = join(outDir, "stock-float-unpacked.zip");
+const zip = spawnSync("zip", ["-r", "-9", zipPath, "."], {
+  cwd: dist,
+  encoding: "utf8",
+});
+if (zip.status !== 0) {
+  console.error(zip.stderr || zip.stdout || "zip failed");
+  process.exit(1);
+}
+console.log("packed", zipPath);
