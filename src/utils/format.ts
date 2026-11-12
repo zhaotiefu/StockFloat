@@ -23,9 +23,17 @@ export function formatTime(timestamp: number | null | undefined): string {
   if (!timestamp) return "--:--:--";
   const d = new Date(timestamp);
   if (Number.isNaN(d.getTime())) return "--:--:--";
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
+  // A-share tool: always show Asia/Shanghai wall clock.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const hh = parts.find((p) => p.type === "hour")?.value ?? "--";
+  const mm = parts.find((p) => p.type === "minute")?.value ?? "--";
+  const ss = parts.find((p) => p.type === "second")?.value ?? "--";
   return `${hh}:${mm}:${ss}`;
 }
 
