@@ -24,7 +24,7 @@ func TestInferBoard(t *testing.T) {
 }
 
 func TestNormalizeSettings(t *testing.T) {
-	s := Settings{RefreshInterval: 0, Opacity: 5}
+	s := Settings{RefreshInterval: 0, Opacity: 0}
 	normalizeSettings(&s)
 	if s.RefreshInterval != 2 {
 		t.Fatalf("interval=%d", s.RefreshInterval)
@@ -32,8 +32,24 @@ func TestNormalizeSettings(t *testing.T) {
 	if s.Opacity != 100 {
 		t.Fatalf("opacity=%d", s.Opacity)
 	}
+	s2 := Settings{Opacity: 5, RowGap: 9}
+	normalizeSettings(&s2)
+	if s2.Opacity != 10 {
+		t.Fatalf("opacity min=%d", s2.Opacity)
+	}
+	if s2.RowGap != 2 {
+		t.Fatalf("rowGap=%d", s2.RowGap)
+	}
 	if len(s.Watchlist) == 0 {
 		t.Fatal("expected default watchlist")
+	}
+}
+
+func TestFormatQuoteLine(t *testing.T) {
+	q := Quote{HasPrice: true, Price: 53.33, HasChange: true, ChangePercent: -0.15}
+	line, _ := formatQuoteLine("中国平安", "601318", false, q)
+	if line != "中国平安  53.33  (-0.15%)" {
+		t.Fatalf("line=%q", line)
 	}
 }
 

@@ -70,8 +70,8 @@ func setAlwaysOnTop(w fyne.Window, on bool) {
 }
 
 func setWindowOpacity(w fyne.Window, percent int) {
-	if percent < 20 {
-		percent = 20
+	if percent < 10 {
+		percent = 10
 	}
 	if percent > 100 {
 		percent = 100
