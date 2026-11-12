@@ -300,17 +300,15 @@ type floatUI struct {
 	opacitySlide  *widget.Slider
 	topBtn        *widget.Button
 	minimized     bool
-	settingsWin  fyne.Window
-	uiPulse      chan struct{}
-	dock         edgeDock
-	refreshBusy  bool
+	settingsWin fyne.Window
+	dock        edgeDock
+	refreshBusy bool
 }
 
 func (f *floatUI) requestUI() {
-	select {
-	case f.uiPulse <- struct{}{}:
-	default:
-	}
+	fyne.Do(func() {
+		f.rebuildList()
+	})
 }
 
 func cstNow() time.Time {
@@ -418,8 +416,12 @@ func (f *floatUI) refreshQuotes(manual bool) {
 	watch := append([]WatchStock{}, f.data.Settings.Watchlist...)
 	f.mu.Unlock()
 
-	if manual && f.statusLbl != nil {
-		f.statusLbl.SetText("刷新中…")
+	if manual {
+		fyne.Do(func() {
+			if f.statusLbl != nil {
+				f.statusLbl.SetText("刷新中…")
+			}
+		})
 	}
 
 	qs, err := fetchQuotes(watch)
@@ -443,14 +445,16 @@ func (f *floatUI) refreshQuotes(manual bool) {
 	f.refreshBusy = false
 	f.mu.Unlock()
 
-	if manual && f.statusLbl != nil {
-		if err != nil {
-			f.statusLbl.SetText("刷新失败")
-		} else {
-			f.statusLbl.SetText("已刷新")
+	fyne.Do(func() {
+		if manual && f.statusLbl != nil {
+			if err != nil {
+				f.statusLbl.SetText("刷新失败")
+			} else {
+				f.statusLbl.SetText("已刷新")
+			}
 		}
-	}
-	f.requestUI()
+		f.rebuildList()
+	})
 }
 
 func (f *floatUI) addSymbol(sym string) string {
@@ -518,17 +522,11 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	}
 	f.mu.Unlock()
 
-	btnMin := widget.NewButton("─", func() { f.setMinimized(true) })
-	btnHide := widget.NewButton("隐藏", func() {
-		f.win.Hide()
-		f.mu.Lock()
-		f.data.Settings.Enabled = false
-		_ = saveData(f.data)
-		f.mu.Unlock()
-	})
+	btnMin := widget.NewButton("收起", func() { f.setMinimized(true) })
 
-	// Compact header: title + window controls, then a full-width action row.
-	titleRow := container.NewBorder(nil, nil, title, container.NewHBox(btnMin, btnHide))
+	// Title + compact; hide-to-tray is via window close (intercepted) or settings,
+	// so header clicks are less likely to accidentally dismiss the float.
+	titleRow := container.NewBorder(nil, nil, title, btnMin)
 	actionRow := container.NewGridWithColumns(3, btnRefresh, f.topBtn, btnSettings)
 
 	f.listBox = container.NewVBox()
@@ -752,6 +750,13 @@ func (f *floatUI) openSettings() {
 		f.setMinimized(false)
 		f.applyWindowChrome()
 	})
+	hideBtn := widget.NewButton("隐藏到托盘", func() {
+		f.win.Hide()
+		f.mu.Lock()
+		f.data.Settings.Enabled = false
+		_ = saveData(f.data)
+		f.mu.Unlock()
+	})
 
 	form := container.NewVBox(
 		widget.NewLabelWithStyle("自选股票", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -765,8 +770,8 @@ func (f *floatUI) openSettings() {
 		alwaysTop,
 		edgeHide,
 		container.NewBorder(nil, nil, widget.NewLabel("透明度"), opLbl, opSlider),
-		showBtn,
-		widget.NewLabel("提示：置顶/透明度/贴边隐藏在 Windows 下生效；配置保存在程序同目录 stockfloat-data.json"),
+		container.NewGridWithColumns(2, showBtn, hideBtn),
+		widget.NewLabel("提示：点窗口关闭键也会隐藏到托盘（不退出）。置顶/透明度/贴边隐藏在 Windows 下生效。"),
 	)
 	w.SetContent(container.NewPadded(form))
 	w.SetOnClosed(func() { f.settingsWin = nil })
@@ -895,9 +900,8 @@ func main() {
 	data := loadData()
 
 	ui := &floatUI{
-		app:     a,
-		data:    data,
-		uiPulse: make(chan struct{}, 1),
+		app:  a,
+		data: data,
 	}
 	w := a.NewWindow(appTitle)
 	ui.win = w
@@ -913,21 +917,14 @@ func main() {
 	ui.rebuildList()
 
 	go func() {
-		for range ui.uiPulse {
-			func() {
-				defer func() { _ = recover() }()
-				ui.rebuildList()
-			}()
-		}
-	}()
-
-	go func() {
 		t := time.NewTicker(1 * time.Second)
 		defer t.Stop()
 		for range t.C {
-			if ui.clockLbl != nil && !ui.minimized {
-				ui.clockLbl.SetText(cstNow().Format("15:04:05"))
-			}
+			fyne.Do(func() {
+				if ui.clockLbl != nil && !ui.minimized {
+					ui.clockLbl.SetText(cstNow().Format("15:04:05"))
+				}
+			})
 			ui.tickEdgeAutoHide()
 		}
 	}()

@@ -29,7 +29,7 @@ func TestAddSymbolAndSettingsDefaults(t *testing.T) {
 		t.Fatal("edge auto hide")
 	}
 
-	ui := &floatUI{data: d, uiPulse: make(chan struct{}, 1)}
+	ui := &floatUI{data: d}
 	if msg := ui.addSymbol("bad"); msg == "" {
 		t.Fatal("expected invalid symbol error")
 	}
@@ -48,9 +48,8 @@ func TestFloatContentWidgets(t *testing.T) {
 	a := test.NewApp()
 	defer a.Quit()
 	ui := &floatUI{
-		app:     a,
-		data:    defaultData(),
-		uiPulse: make(chan struct{}, 1),
+		app:  a,
+		data: defaultData(),
 	}
 	w := a.NewWindow("Stock Float")
 	ui.win = w
