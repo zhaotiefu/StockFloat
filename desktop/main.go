@@ -23,7 +23,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -35,6 +34,8 @@ const (
 	maxWatch = 20
 	appTitle = "Stock Float"
 	quoteURL = "https://qt.gtimg.cn/q="
+	edgePx   = 10
+	peekPx   = 8
 )
 
 type WatchStock struct {
@@ -47,6 +48,9 @@ type Settings struct {
 	Enabled         bool         `json:"enabled"`
 	RefreshInterval int          `json:"refreshInterval"`
 	ShowSymbol      bool         `json:"showSymbol"`
+	AlwaysOnTop     bool         `json:"alwaysOnTop"`
+	EdgeAutoHide    bool         `json:"edgeAutoHide"`
+	Opacity         int          `json:"opacity"`
 	Watchlist       []WatchStock `json:"watchlist"`
 }
 
@@ -69,6 +73,9 @@ func defaultData() AppData {
 			Enabled:         true,
 			RefreshInterval: 2,
 			ShowSymbol:      false,
+			AlwaysOnTop:     true,
+			EdgeAutoHide:    false,
+			Opacity:         100,
 			Watchlist: []WatchStock{
 				{Symbol: "601318", Name: "中国平安", Board: "SH"},
 				{Symbol: "600519", Name: "贵州茅台", Board: "SH"},
@@ -76,6 +83,18 @@ func defaultData() AppData {
 				{Symbol: "300750", Name: "宁德时代", Board: "SZ"},
 			},
 		},
+	}
+}
+
+func normalizeSettings(s *Settings) {
+	if s.RefreshInterval <= 0 {
+		s.RefreshInterval = 2
+	}
+	if s.Opacity < 20 || s.Opacity > 100 {
+		s.Opacity = 100
+	}
+	if len(s.Watchlist) == 0 {
+		s.Watchlist = defaultData().Settings.Watchlist
 	}
 }
 
@@ -98,16 +117,12 @@ func loadData() AppData {
 	if err := json.Unmarshal(b, &d); err != nil {
 		return defaultData()
 	}
-	if d.Settings.RefreshInterval <= 0 {
-		d.Settings.RefreshInterval = 2
-	}
-	if len(d.Settings.Watchlist) == 0 {
-		d.Settings.Watchlist = defaultData().Settings.Watchlist
-	}
+	normalizeSettings(&d.Settings)
 	return d
 }
 
 func saveData(d AppData) error {
+	normalizeSettings(&d.Settings)
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
@@ -135,9 +150,9 @@ func providerCode(s WatchStock) string {
 func decodeGBK(b []byte) string {
 	out, err := io.ReadAll(transform.NewReader(bytes.NewReader(b), simplifiedchinese.GBK.NewDecoder()))
 	if err != nil || len(out) == 0 {
-		if utf8.Valid(b) {
-			return string(b)
-		}
+		return string(b)
+	}
+	if !utf8.Valid(out) {
 		return string(b)
 	}
 	return string(out)
@@ -233,9 +248,9 @@ type lightTheme struct{}
 func (lightTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 	switch n {
 	case theme.ColorNameBackground:
-		return color.NRGBA{R: 255, G: 255, B: 255, A: 245}
+		return color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	case theme.ColorNameButton:
-		return color.NRGBA{R: 15, G: 118, B: 110, A: 255}
+		return color.NRGBA{R: 226, G: 232, B: 240, A: 255}
 	case theme.ColorNameForeground:
 		return color.NRGBA{R: 31, G: 41, B: 55, A: 255}
 	case theme.ColorNamePlaceHolder:
@@ -254,24 +269,41 @@ func (lightTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color 
 		return theme.DefaultTheme().Color(n, theme.VariantLight)
 	}
 }
-func (lightTheme) Font(s fyne.TextStyle) fyne.Resource      { return theme.DefaultTheme().Font(s) }
-func (lightTheme) Icon(n fyne.ThemeIconName) fyne.Resource  { return theme.DefaultTheme().Icon(n) }
-func (lightTheme) Size(n fyne.ThemeSizeName) float32        { return theme.DefaultTheme().Size(n) }
+func (lightTheme) Font(s fyne.TextStyle) fyne.Resource     { return theme.DefaultTheme().Font(s) }
+func (lightTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return theme.DefaultTheme().Icon(n) }
+func (lightTheme) Size(n fyne.ThemeSizeName) float32       { return theme.DefaultTheme().Size(n) }
+
+type edgeDock struct {
+	hidden bool
+	edge   string
+	fullX  int
+	fullY  int
+	fullW  int
+	fullH  int
+	nearAt time.Time
+}
 
 type floatUI struct {
-	mu          sync.Mutex
-	data        AppData
-	quotes      []Quote
-	lastErr     string
-	updatedAt   time.Time
-	app         fyne.App
-	win         fyne.Window
-	listBox     *fyne.Container
-	statusLbl   *widget.Label
-	timeLbl     *widget.Label
-	minimized   bool
-	settingsWin fyne.Window
-	uiPulse     chan struct{}
+	mu            sync.Mutex
+	data          AppData
+	quotes        []Quote
+	lastErr       string
+	updatedAt     time.Time
+	app           fyne.App
+	win           fyne.Window
+	listBox       *fyne.Container
+	clockLbl      *widget.Label
+	refreshLbl    *widget.Label
+	statusLbl     *widget.Label
+	addEntry      *widget.Entry
+	addErrLbl     *widget.Label
+	opacitySlide  *widget.Slider
+	topBtn        *widget.Button
+	minimized     bool
+	settingsWin  fyne.Window
+	uiPulse      chan struct{}
+	dock         edgeDock
+	refreshBusy  bool
 }
 
 func (f *floatUI) requestUI() {
@@ -281,16 +313,39 @@ func (f *floatUI) requestUI() {
 	}
 }
 
+func cstNow() time.Time {
+	return time.Now().In(time.FixedZone("CST", 8*3600))
+}
+
+func (f *floatUI) applyWindowChrome() {
+	f.mu.Lock()
+	onTop := f.data.Settings.AlwaysOnTop
+	opacity := f.data.Settings.Opacity
+	f.mu.Unlock()
+	setAlwaysOnTop(f.win, onTop)
+	setWindowOpacity(f.win, opacity)
+	if f.topBtn != nil {
+		if onTop {
+			f.topBtn.SetText("置顶✓")
+		} else {
+			f.topBtn.SetText("置顶")
+		}
+	}
+}
+
 func (f *floatUI) rebuildList() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listBox == nil {
+		return
+	}
 	items := []fyne.CanvasObject{}
 	qmap := map[string]Quote{}
 	for _, q := range f.quotes {
 		qmap[q.Symbol] = q
 	}
 	if len(f.data.Settings.Watchlist) == 0 {
-		items = append(items, widget.NewLabel("尚未添加自选股票"))
+		items = append(items, widget.NewLabel("尚未添加自选股票，下方可直接添加"))
 	}
 	for _, s := range f.data.Settings.Watchlist {
 		q := qmap[s.Symbol]
@@ -300,7 +355,7 @@ func (f *floatUI) rebuildList() {
 		}
 		leftText := name
 		if f.data.Settings.ShowSymbol {
-			leftText = fmt.Sprintf("%s\n%s", name, s.Symbol)
+			leftText = fmt.Sprintf("%s  %s", name, s.Symbol)
 		}
 		price := "--"
 		if q.HasPrice {
@@ -326,30 +381,49 @@ func (f *floatUI) rebuildList() {
 		chgLbl.TextSize = 13
 		chgLbl.TextStyle = fyne.TextStyle{Bold: true}
 		chgLbl.Alignment = fyne.TextAlignTrailing
-		row := container.NewBorder(nil, nil, nameLbl, container.NewHBox(layout.NewSpacer(), priceLbl, widget.NewLabel("  "), chgLbl))
+		row := container.NewBorder(nil, nil, nameLbl, container.NewHBox(priceLbl, widget.NewLabel(" "), chgLbl))
 		items = append(items, container.NewPadded(row))
 	}
 	f.listBox.Objects = items
 	f.listBox.Refresh()
 
-	if f.lastErr != "" {
-		f.statusLbl.SetText("更新异常")
-		f.timeLbl.SetText(f.lastErr)
-	} else {
-		f.statusLbl.SetText("自动刷新中")
-		if f.updatedAt.IsZero() {
-			f.timeLbl.SetText("--:--:--")
+	if f.clockLbl != nil {
+		f.clockLbl.SetText(cstNow().Format("15:04:05"))
+	}
+	if f.refreshLbl != nil {
+		if f.lastErr != "" {
+			f.refreshLbl.SetText("刷新失败")
+		} else if f.updatedAt.IsZero() {
+			f.refreshLbl.SetText("刷新 --:--:--")
 		} else {
-			f.timeLbl.SetText(f.updatedAt.In(time.FixedZone("CST", 8*3600)).Format("15:04:05"))
+			f.refreshLbl.SetText("刷新 " + f.updatedAt.In(time.FixedZone("CST", 8*3600)).Format("15:04:05"))
+		}
+	}
+	if f.statusLbl != nil && !f.refreshBusy {
+		if f.lastErr != "" {
+			f.statusLbl.SetText("异常")
+		} else {
+			f.statusLbl.SetText("自动刷新")
 		}
 	}
 }
 
-func (f *floatUI) refreshQuotes() {
+func (f *floatUI) refreshQuotes(manual bool) {
 	f.mu.Lock()
+	if f.refreshBusy {
+		f.mu.Unlock()
+		return
+	}
+	f.refreshBusy = true
 	watch := append([]WatchStock{}, f.data.Settings.Watchlist...)
 	f.mu.Unlock()
+
+	if manual && f.statusLbl != nil {
+		f.statusLbl.SetText("刷新中…")
+	}
+
 	qs, err := fetchQuotes(watch)
+
 	f.mu.Lock()
 	if err != nil {
 		f.lastErr = err.Error()
@@ -366,54 +440,163 @@ func (f *floatUI) refreshQuotes() {
 		}
 		_ = saveData(f.data)
 	}
+	f.refreshBusy = false
 	f.mu.Unlock()
+
+	if manual && f.statusLbl != nil {
+		if err != nil {
+			f.statusLbl.SetText("刷新失败")
+		} else {
+			f.statusLbl.SetText("已刷新")
+		}
+	}
 	f.requestUI()
+}
+
+func (f *floatUI) addSymbol(sym string) string {
+	sym = strings.TrimSpace(sym)
+	board, ok := inferBoard(sym)
+	if !ok {
+		return "请输入合法 6 位 A 股代码"
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.data.Settings.Watchlist {
+		if s.Symbol == sym {
+			return "该股票已在自选列表中"
+		}
+	}
+	if len(f.data.Settings.Watchlist) >= maxWatch {
+		return fmt.Sprintf("自选最多 %d 只", maxWatch)
+	}
+	f.data.Settings.Watchlist = append(f.data.Settings.Watchlist, WatchStock{Symbol: sym, Name: sym, Board: board})
+	_ = saveData(f.data)
+	return ""
 }
 
 func (f *floatUI) setMinimized(v bool) {
 	f.minimized = v
 	if v {
-		f.win.Resize(fyne.NewSize(180, 48))
-		f.win.SetContent(container.NewPadded(widget.NewButton("STOCK  点击恢复", func() {
+		f.win.Resize(fyne.NewSize(200, 52))
+		f.win.SetContent(container.NewPadded(widget.NewButton("STOCK FLOAT  点击恢复", func() {
 			f.setMinimized(false)
+			f.applyWindowChrome()
 		})))
 	} else {
-		f.win.Resize(fyne.NewSize(320, 360))
+		f.win.Resize(fyne.NewSize(360, 520))
 		f.win.SetContent(f.fullContent())
 		f.rebuildList()
+		f.applyWindowChrome()
 	}
 }
 
 func (f *floatUI) fullContent() fyne.CanvasObject {
 	title := widget.NewLabelWithStyle("STOCK FLOAT", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	btnSettings := widget.NewButtonWithIcon("", theme.SettingsIcon(), f.openSettings)
+
+	btnSettings := widget.NewButton("设置", func() {
+		f.openSettings()
+	})
+	btnRefresh := widget.NewButton("刷新", func() {
+		go f.refreshQuotes(true)
+	})
+	f.topBtn = widget.NewButton("置顶", func() {
+		f.mu.Lock()
+		f.data.Settings.AlwaysOnTop = !f.data.Settings.AlwaysOnTop
+		on := f.data.Settings.AlwaysOnTop
+		_ = saveData(f.data)
+		f.mu.Unlock()
+		setAlwaysOnTop(f.win, on)
+		if on {
+			f.topBtn.SetText("置顶✓")
+		} else {
+			f.topBtn.SetText("置顶")
+		}
+	})
+	f.mu.Lock()
+	if f.data.Settings.AlwaysOnTop {
+		f.topBtn.SetText("置顶✓")
+	}
+	f.mu.Unlock()
+
 	btnMin := widget.NewButton("─", func() { f.setMinimized(true) })
-	btnHide := widget.NewButton("×", func() {
+	btnHide := widget.NewButton("隐藏", func() {
 		f.win.Hide()
 		f.mu.Lock()
 		f.data.Settings.Enabled = false
 		_ = saveData(f.data)
 		f.mu.Unlock()
 	})
-	btnRefresh := widget.NewButton("刷新", func() { go f.refreshQuotes() })
-	header := container.NewBorder(nil, nil, title, container.NewHBox(btnSettings, btnMin, btnHide))
+
+	// Compact header: title + window controls, then a full-width action row.
+	titleRow := container.NewBorder(nil, nil, title, container.NewHBox(btnMin, btnHide))
+	actionRow := container.NewGridWithColumns(3, btnRefresh, f.topBtn, btnSettings)
+
 	f.listBox = container.NewVBox()
 	scroll := container.NewVScroll(f.listBox)
-	f.timeLbl = widget.NewLabel("--:--:--")
-	f.statusLbl = widget.NewLabel("自动刷新中")
-	footer := container.NewBorder(nil, nil, f.timeLbl, container.NewHBox(f.statusLbl, btnRefresh))
-	return container.NewBorder(container.NewPadded(header), container.NewPadded(footer), nil, nil, scroll)
+	scroll.SetMinSize(fyne.NewSize(320, 180))
+
+	f.addEntry = widget.NewEntry()
+	f.addEntry.SetPlaceHolder("代码 601318")
+	f.addErrLbl = widget.NewLabel("")
+	f.addErrLbl.Hide()
+	addBtn := widget.NewButton("添加", func() {
+		msg := f.addSymbol(f.addEntry.Text)
+		if msg != "" {
+			f.addErrLbl.SetText(msg)
+			f.addErrLbl.Show()
+			return
+		}
+		f.addErrLbl.Hide()
+		f.addEntry.SetText("")
+		f.requestUI()
+		go f.refreshQuotes(true)
+	})
+	addRow := container.NewBorder(nil, nil, nil, addBtn, f.addEntry)
+
+	f.mu.Lock()
+	op := float64(f.data.Settings.Opacity)
+	f.mu.Unlock()
+	f.opacitySlide = widget.NewSlider(20, 100)
+	f.opacitySlide.Step = 5
+	f.opacitySlide.SetValue(op)
+	opacityLbl := widget.NewLabel(fmt.Sprintf("%d%%", int(op)))
+	f.opacitySlide.OnChanged = func(v float64) {
+		pct := int(v)
+		opacityLbl.SetText(fmt.Sprintf("%d%%", pct))
+		f.mu.Lock()
+		f.data.Settings.Opacity = pct
+		_ = saveData(f.data)
+		f.mu.Unlock()
+		setWindowOpacity(f.win, pct)
+	}
+	opacityRow := container.NewBorder(nil, nil, widget.NewLabel("透明度"), opacityLbl, f.opacitySlide)
+
+	f.clockLbl = widget.NewLabel(cstNow().Format("15:04:05"))
+	f.refreshLbl = widget.NewLabel("刷新 --:--:--")
+	f.statusLbl = widget.NewLabel("自动刷新")
+	// Left: current clock, then a clear gap, then last refresh time.
+	footerLeft := container.NewHBox(f.clockLbl, widget.NewLabel("          "), f.refreshLbl)
+	footer := container.NewBorder(nil, nil, footerLeft, f.statusLbl)
+
+	top := container.NewVBox(titleRow, actionRow, addRow, f.addErrLbl, opacityRow)
+
+	return container.NewBorder(
+		container.NewPadded(top),
+		container.NewPadded(container.NewVBox(widget.NewSeparator(), footer)),
+		nil, nil, container.NewPadded(scroll),
+	)
 }
 
 func (f *floatUI) openSettings() {
 	if f.settingsWin != nil {
 		f.settingsWin.Show()
 		f.settingsWin.RequestFocus()
+		setAlwaysOnTop(f.settingsWin, true)
 		return
 	}
 	w := f.app.NewWindow("Stock Float 设置")
 	f.settingsWin = w
-	w.Resize(fyne.NewSize(380, 520))
+	w.Resize(fyne.NewSize(420, 620))
 
 	symbolEntry := widget.NewEntry()
 	symbolEntry.SetPlaceHolder("输入 6 位代码，如 601318")
@@ -428,18 +611,36 @@ func (f *floatUI) openSettings() {
 			return len(f.data.Settings.Watchlist)
 		},
 		func() fyne.CanvasObject {
-			return container.NewBorder(nil, nil, widget.NewLabel("name"), widget.NewButton("删除", nil))
+			name := widget.NewLabel("name")
+			btn := widget.NewButton("删除", nil)
+			return container.NewBorder(nil, nil, nil, btn, name)
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
+			box, ok := o.(*fyne.Container)
+			if !ok {
+				return
+			}
+			var name *widget.Label
+			var btn *widget.Button
+			for _, child := range box.Objects {
+				switch t := child.(type) {
+				case *widget.Label:
+					name = t
+				case *widget.Button:
+					btn = t
+				}
+			}
+			if name == nil || btn == nil {
+				return
+			}
 			f.mu.Lock()
-			defer f.mu.Unlock()
 			if i < 0 || i >= len(f.data.Settings.Watchlist) {
+				f.mu.Unlock()
 				return
 			}
 			s := f.data.Settings.Watchlist[i]
-			box := o.(*fyne.Container)
-			box.Objects[0].(*widget.Label).SetText(fmt.Sprintf("%s  %s", s.Name, s.Symbol))
-			btn := box.Objects[1].(*widget.Button)
+			f.mu.Unlock()
+			name.SetText(fmt.Sprintf("%s  %s", s.Name, s.Symbol))
 			idx := i
 			btn.OnTapped = func() {
 				f.mu.Lock()
@@ -450,60 +651,96 @@ func (f *floatUI) openSettings() {
 				f.mu.Unlock()
 				watchList.Refresh()
 				f.requestUI()
-				go f.refreshQuotes()
+				go f.refreshQuotes(false)
 			}
 		},
 	)
 
-	interval := widget.NewSelect([]string{"2", "5", "10", "30"}, func(v string) {
+	f.mu.Lock()
+	curInterval := f.data.Settings.RefreshInterval
+	curShowSym := f.data.Settings.ShowSymbol
+	curAlwaysTop := f.data.Settings.AlwaysOnTop
+	curEdgeHide := f.data.Settings.EdgeAutoHide
+	opVal := float64(f.data.Settings.Opacity)
+	f.mu.Unlock()
+
+	interval := widget.NewSelect([]string{"2", "5", "10", "30"}, nil)
+	showSym := widget.NewCheck("显示股票代码", nil)
+	alwaysTop := widget.NewCheck("窗口始终置顶（可盖住其他程序）", nil)
+	edgeHide := widget.NewCheck("贴近屏幕边缘自动隐藏（留出细条，鼠标移入展开）", nil)
+
+	interval.SetSelected(strconv.Itoa(curInterval))
+	showSym.SetChecked(curShowSym)
+	alwaysTop.SetChecked(curAlwaysTop)
+	edgeHide.SetChecked(curEdgeHide)
+
+	interval.OnChanged = func(v string) {
 		n, _ := strconv.Atoi(v)
 		f.mu.Lock()
 		f.data.Settings.RefreshInterval = n
 		_ = saveData(f.data)
 		f.mu.Unlock()
-	})
-	f.mu.Lock()
-	interval.SetSelected(strconv.Itoa(f.data.Settings.RefreshInterval))
-	showSym := widget.NewCheck("显示股票代码", func(v bool) {
+	}
+	showSym.OnChanged = func(v bool) {
 		f.mu.Lock()
 		f.data.Settings.ShowSymbol = v
 		_ = saveData(f.data)
 		f.mu.Unlock()
 		f.requestUI()
-	})
-	showSym.SetChecked(f.data.Settings.ShowSymbol)
-	f.mu.Unlock()
-
-	addBtn := widget.NewButton("添加", func() {
-		sym := strings.TrimSpace(symbolEntry.Text)
-		board, ok := inferBoard(sym)
-		if !ok {
-			errLbl.SetText("请输入合法 6 位 A 股代码")
-			errLbl.Show()
-			return
-		}
+	}
+	alwaysTop.OnChanged = func(v bool) {
 		f.mu.Lock()
-		for _, s := range f.data.Settings.Watchlist {
-			if s.Symbol == sym {
-				f.mu.Unlock()
-				errLbl.SetText("该股票已在自选列表中")
-				errLbl.Show()
-				return
-			}
-		}
-		if len(f.data.Settings.Watchlist) >= maxWatch {
-			f.mu.Unlock()
-			errLbl.SetText(fmt.Sprintf("自选最多 %d 只", maxWatch))
-			errLbl.Show()
-			return
-		}
-		f.data.Settings.Watchlist = append(f.data.Settings.Watchlist, WatchStock{Symbol: sym, Name: sym, Board: board})
+		f.data.Settings.AlwaysOnTop = v
 		_ = saveData(f.data)
 		f.mu.Unlock()
+		setAlwaysOnTop(f.win, v)
+		if f.topBtn != nil {
+			if v {
+				f.topBtn.SetText("置顶✓")
+			} else {
+				f.topBtn.SetText("置顶")
+			}
+		}
+	}
+	edgeHide.OnChanged = func(v bool) {
+		f.mu.Lock()
+		f.data.Settings.EdgeAutoHide = v
+		_ = saveData(f.data)
+		if !v && f.dock.hidden {
+			f.restoreFromEdge()
+		}
+		f.mu.Unlock()
+	}
+
+	opSlider := widget.NewSlider(20, 100)
+	opSlider.Step = 5
+	opSlider.SetValue(opVal)
+	opLbl := widget.NewLabel(fmt.Sprintf("%d%%", int(opVal)))
+	opSlider.OnChanged = func(v float64) {
+		pct := int(v)
+		opLbl.SetText(fmt.Sprintf("%d%%", pct))
+		f.mu.Lock()
+		f.data.Settings.Opacity = pct
+		_ = saveData(f.data)
+		f.mu.Unlock()
+		setWindowOpacity(f.win, pct)
+		if f.opacitySlide != nil {
+			f.opacitySlide.SetValue(float64(pct))
+		}
+	}
+
+	addBtn := widget.NewButton("添加", func() {
+		msg := f.addSymbol(symbolEntry.Text)
+		if msg != "" {
+			errLbl.SetText(msg)
+			errLbl.Show()
+			return
+		}
 		errLbl.Hide()
 		symbolEntry.SetText("")
 		watchList.Refresh()
-		go f.refreshQuotes()
+		f.requestUI()
+		go f.refreshQuotes(true)
 	})
 
 	showBtn := widget.NewButton("显示悬浮窗", func() {
@@ -513,23 +750,131 @@ func (f *floatUI) openSettings() {
 		f.mu.Unlock()
 		f.win.Show()
 		f.setMinimized(false)
+		f.applyWindowChrome()
 	})
 
 	form := container.NewVBox(
 		widget.NewLabelWithStyle("自选股票", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewBorder(nil, nil, nil, addBtn, symbolEntry),
 		errLbl,
-		container.NewGridWrap(fyne.NewSize(340, 220), watchList),
+		container.NewGridWrap(fyne.NewSize(380, 200), watchList),
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("设置", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("显示与行为", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewBorder(nil, nil, widget.NewLabel("刷新间隔(秒)"), interval),
 		showSym,
+		alwaysTop,
+		edgeHide,
+		container.NewBorder(nil, nil, widget.NewLabel("透明度"), opLbl, opSlider),
 		showBtn,
-		widget.NewLabel("绿色便携版：配置保存在程序同目录 stockfloat-data.json"),
+		widget.NewLabel("提示：置顶/透明度/贴边隐藏在 Windows 下生效；配置保存在程序同目录 stockfloat-data.json"),
 	)
 	w.SetContent(container.NewPadded(form))
 	w.SetOnClosed(func() { f.settingsWin = nil })
 	w.Show()
+	w.RequestFocus()
+	setAlwaysOnTop(w, true)
+}
+
+func (f *floatUI) restoreFromEdge() {
+	if !f.dock.hidden {
+		return
+	}
+	moveWindow(f.win, f.dock.fullX, f.dock.fullY, f.dock.fullW, f.dock.fullH)
+	f.dock.hidden = false
+	f.dock.edge = ""
+}
+
+func (f *floatUI) hideToEdge(edge string, x, y, w, h int) {
+	f.dock.fullX, f.dock.fullY, f.dock.fullW, f.dock.fullH = x, y, w, h
+	f.dock.edge = edge
+	f.dock.hidden = true
+	switch edge {
+	case "left":
+		moveWindow(f.win, -w+peekPx, y, w, h)
+	case "right":
+		sw, _ := screenSize()
+		moveWindow(f.win, sw-peekPx, y, w, h)
+	case "top":
+		moveWindow(f.win, x, -h+peekPx, w, h)
+	case "bottom":
+		_, sh := screenSize()
+		moveWindow(f.win, x, sh-peekPx, w, h)
+	}
+}
+
+func pointInRect(px, py, x, y, w, h int) bool {
+	return px >= x && px <= x+w && py >= y && py <= y+h
+}
+
+func (f *floatUI) tickEdgeAutoHide() {
+	f.mu.Lock()
+	enabled := f.data.Settings.EdgeAutoHide && !f.minimized
+	hidden := f.dock.hidden
+	f.mu.Unlock()
+	if !enabled || !windowVisible(f.win) {
+		return
+	}
+
+	cx, cy, cok := cursorPos()
+	x, y, w, h, rok := getWindowRect(f.win)
+	if !cok || !rok {
+		return
+	}
+
+	if hidden {
+		// Expand hit area around peek strip
+		hitX, hitY, hitW, hitH := x, y, w, h
+		switch f.dock.edge {
+		case "left":
+			hitX, hitW = 0, peekPx+24
+		case "right":
+			sw, _ := screenSize()
+			hitX, hitW = sw-peekPx-24, peekPx+24
+		case "top":
+			hitY, hitH = 0, peekPx+24
+		case "bottom":
+			_, sh := screenSize()
+			hitY, hitH = sh-peekPx-24, peekPx+24
+		}
+		if pointInRect(cx, cy, hitX, hitY, hitW, hitH) {
+			f.mu.Lock()
+			f.restoreFromEdge()
+			f.mu.Unlock()
+		}
+		return
+	}
+
+	if pointInRect(cx, cy, x, y, w, h) {
+		f.dock.nearAt = time.Time{}
+		return
+	}
+
+	sw, sh := screenSize()
+	edge := ""
+	if x <= edgePx {
+		edge = "left"
+	} else if x+w >= sw-edgePx {
+		edge = "right"
+	} else if y <= edgePx {
+		edge = "top"
+	} else if y+h >= sh-edgePx {
+		edge = "bottom"
+	}
+	if edge == "" {
+		f.dock.nearAt = time.Time{}
+		return
+	}
+	if f.dock.nearAt.IsZero() {
+		f.dock.nearAt = time.Now()
+		return
+	}
+	if time.Since(f.dock.nearAt) < 700*time.Millisecond {
+		return
+	}
+	f.mu.Lock()
+	f.hideToEdge(edge, x, y, w, h)
+	f.dock.nearAt = time.Time{}
+	f.mu.Unlock()
 }
 
 func openDataDir() {
@@ -549,10 +894,14 @@ func main() {
 	a.Settings().SetTheme(&lightTheme{})
 	data := loadData()
 
-	ui := &floatUI{app: a, data: data, uiPulse: make(chan struct{}, 1)}
+	ui := &floatUI{
+		app:     a,
+		data:    data,
+		uiPulse: make(chan struct{}, 1),
+	}
 	w := a.NewWindow(appTitle)
 	ui.win = w
-	w.Resize(fyne.NewSize(320, 360))
+	w.Resize(fyne.NewSize(360, 520))
 	w.SetCloseIntercept(func() {
 		w.Hide()
 		ui.mu.Lock()
@@ -561,10 +910,25 @@ func main() {
 		ui.mu.Unlock()
 	})
 	w.SetContent(ui.fullContent())
+	ui.rebuildList()
 
 	go func() {
 		for range ui.uiPulse {
-			ui.rebuildList()
+			func() {
+				defer func() { _ = recover() }()
+				ui.rebuildList()
+			}()
+		}
+	}()
+
+	go func() {
+		t := time.NewTicker(1 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			if ui.clockLbl != nil && !ui.minimized {
+				ui.clockLbl.SetText(cstNow().Format("15:04:05"))
+			}
+			ui.tickEdgeAutoHide()
 		}
 	}()
 
@@ -577,6 +941,7 @@ func main() {
 				ui.mu.Unlock()
 				w.Show()
 				ui.setMinimized(false)
+				ui.applyWindowChrome()
 			}),
 			fyne.NewMenuItem("设置", ui.openSettings),
 			fyne.NewMenuItem("打开数据目录", openDataDir),
@@ -588,7 +953,7 @@ func main() {
 	}
 
 	go func() {
-		ui.refreshQuotes()
+		ui.refreshQuotes(false)
 		for {
 			ui.mu.Lock()
 			sec := ui.data.Settings.RefreshInterval
@@ -597,12 +962,17 @@ func main() {
 				sec = 2
 			}
 			time.Sleep(time.Duration(sec) * time.Second)
-			ui.refreshQuotes()
+			ui.refreshQuotes(false)
 		}
 	}()
 
 	if data.Settings.Enabled {
 		w.Show()
 	}
+	// Apply native chrome after first paint
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		ui.applyWindowChrome()
+	}()
 	a.Run()
 }
