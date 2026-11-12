@@ -316,19 +316,21 @@ func cstNow() time.Time {
 }
 
 func (f *floatUI) applyWindowChrome() {
-	f.mu.Lock()
-	onTop := f.data.Settings.AlwaysOnTop
-	opacity := f.data.Settings.Opacity
-	f.mu.Unlock()
-	setAlwaysOnTop(f.win, onTop)
-	setWindowOpacity(f.win, opacity)
-	if f.topBtn != nil {
-		if onTop {
-			f.topBtn.SetText("置顶✓")
-		} else {
-			f.topBtn.SetText("置顶")
+	fyne.Do(func() {
+		f.mu.Lock()
+		onTop := f.data.Settings.AlwaysOnTop
+		opacity := f.data.Settings.Opacity
+		f.mu.Unlock()
+		setAlwaysOnTop(f.win, onTop)
+		setWindowOpacity(f.win, opacity)
+		if f.topBtn != nil {
+			if onTop {
+				f.topBtn.SetText("置顶✓")
+			} else {
+				f.topBtn.SetText("置顶")
+			}
 		}
-	}
+	})
 }
 
 func (f *floatUI) rebuildList() {
@@ -487,7 +489,7 @@ func (f *floatUI) setMinimized(v bool) {
 			f.applyWindowChrome()
 		})))
 	} else {
-		f.win.Resize(fyne.NewSize(360, 520))
+		f.win.Resize(fyne.NewSize(360, 560))
 		f.win.SetContent(f.fullContent())
 		f.rebuildList()
 		f.applyWindowChrome()
@@ -534,7 +536,7 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	scroll.SetMinSize(fyne.NewSize(320, 180))
 
 	f.addEntry = widget.NewEntry()
-	f.addEntry.SetPlaceHolder("代码 601318")
+	f.addEntry.SetPlaceHolder("输入 6 位代码后回车或点添加")
 	f.addErrLbl = widget.NewLabel("")
 	f.addErrLbl.Hide()
 	doAdd := func() {
@@ -542,24 +544,32 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 		if sym == "" {
 			f.addErrLbl.SetText("请先输入 6 位股票代码")
 			f.addErrLbl.Show()
+			f.addErrLbl.Refresh()
 			return
 		}
 		msg := f.addSymbol(sym)
 		if msg != "" {
 			f.addErrLbl.SetText(msg)
 			f.addErrLbl.Show()
+			f.addErrLbl.Refresh()
 			return
 		}
 		f.addErrLbl.SetText("已添加 " + sym)
 		f.addErrLbl.Show()
+		f.addErrLbl.Refresh()
 		f.addEntry.SetText("")
 		f.rebuildList()
+		if f.statusLbl != nil {
+			f.statusLbl.SetText("已添加")
+		}
 		go f.refreshQuotes(true)
 	}
 	f.addEntry.OnSubmitted = func(string) { doAdd() }
-	addBtn := widget.NewButton("添加", doAdd)
+	addBtn := widget.NewButton("添加股票", doAdd)
 	addBtn.Importance = widget.HighImportance
-	addRow := container.NewBorder(nil, nil, nil, addBtn, f.addEntry)
+	// Full-width button under the entry so clicks cannot miss the control
+	// (side-by-side Border layouts were easy to miss-hit on the entry).
+	addRow := container.NewVBox(f.addEntry, addBtn)
 
 	f.mu.Lock()
 	op := float64(f.data.Settings.Opacity)
@@ -599,7 +609,7 @@ func (f *floatUI) openSettings() {
 	if f.settingsWin != nil {
 		f.settingsWin.Show()
 		f.settingsWin.RequestFocus()
-		setAlwaysOnTop(f.settingsWin, true)
+		fyne.Do(func() { setAlwaysOnTop(f.settingsWin, true) })
 		return
 	}
 	w := f.app.NewWindow("Stock Float 设置")
@@ -796,7 +806,7 @@ func (f *floatUI) openSettings() {
 	w.SetOnClosed(func() { f.settingsWin = nil })
 	w.Show()
 	w.RequestFocus()
-	setAlwaysOnTop(w, true)
+	fyne.Do(func() { setAlwaysOnTop(w, true) })
 }
 
 func (f *floatUI) restoreFromEdge() {
@@ -924,7 +934,8 @@ func main() {
 	}
 	w := a.NewWindow(appTitle)
 	ui.win = w
-	w.Resize(fyne.NewSize(360, 520))
+	w.SetMaster()
+	w.Resize(fyne.NewSize(360, 560))
 	w.SetCloseIntercept(func() {
 		w.Hide()
 		ui.mu.Lock()
