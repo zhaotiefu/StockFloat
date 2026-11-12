@@ -80,19 +80,23 @@
   }
   function onStorageChanged(listener) {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local") return;
-      const payload = {};
-      if (changes.watchlist) {
-        payload.watchlist = changes.watchlist.newValue;
-      }
-      if (changes.settings) {
-        payload.settings = mergeSettings(changes.settings.newValue);
-      }
-      if (changes.quoteSnapshot) {
-        payload.quoteSnapshot = changes.quoteSnapshot.newValue;
-      }
-      if (payload.watchlist || payload.settings || payload.quoteSnapshot) {
-        listener(payload);
+      try {
+        if (!chrome.runtime?.id) return;
+        if (area !== "local") return;
+        const payload = {};
+        if (changes.watchlist) {
+          payload.watchlist = changes.watchlist.newValue;
+        }
+        if (changes.settings) {
+          payload.settings = mergeSettings(changes.settings.newValue);
+        }
+        if (changes.quoteSnapshot) {
+          payload.quoteSnapshot = changes.quoteSnapshot.newValue;
+        }
+        if (payload.watchlist || payload.settings || payload.quoteSnapshot) {
+          listener(payload);
+        }
+      } catch {
       }
     });
   }
@@ -389,6 +393,7 @@
     }
     async send(message) {
       try {
+        if (!chrome.runtime?.id) return;
         await chrome.runtime.sendMessage(message);
       } catch {
       }
@@ -400,19 +405,40 @@
 
   // src/content/content.ts
   var HOST_ID = "stock-float-root";
+  function extensionAlive() {
+    try {
+      return Boolean(chrome.runtime?.id);
+    } catch {
+      return false;
+    }
+  }
+  async function safeSend(message) {
+    if (!extensionAlive()) return null;
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch {
+      return null;
+    }
+  }
   async function main() {
     if (document.getElementById(HOST_ID)) return;
     if (!/^https?:$/.test(location.protocol)) return;
-    const cssUrl = chrome.runtime.getURL("content/float.css");
-    const cssText = await fetch(cssUrl).then((r) => r.text());
+    if (!extensionAlive()) return;
+    let cssText = "";
+    try {
+      const cssUrl = chrome.runtime.getURL("content/float.css");
+      cssText = await fetch(cssUrl).then((r) => r.text());
+    } catch {
+      return;
+    }
     let saveTimer;
     const float = new FloatWindow(cssText, (position) => {
       window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => {
-        void chrome.runtime.sendMessage({ type: "SET_POSITION", position });
+        void safeSend({ type: "SET_POSITION", position });
       }, 120);
     });
-    const boot = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+    const boot = await safeSend({ type: "GET_STATE" });
     if (boot?.ok) {
       if (boot.state) float.applyState(boot.state);
       float.update({
@@ -421,62 +447,73 @@
         lastError: boot.lastError ?? null,
         marketStatus: boot.marketStatus ?? "unknown"
       });
-    } else {
-      const state = await loadState();
-      const snapshot = await loadQuoteSnapshot();
-      float.applyState(state);
-      if (snapshot) {
-        float.update({
-          quotes: snapshot.quotes,
-          lastUpdated: snapshot.lastUpdated,
-          lastError: snapshot.lastError,
-          marketStatus: snapshot.marketStatus
-        });
+    } else if (extensionAlive()) {
+      try {
+        const state = await loadState();
+        const snapshot = await loadQuoteSnapshot();
+        float.applyState(state);
+        if (snapshot) {
+          float.update({
+            quotes: snapshot.quotes,
+            lastUpdated: snapshot.lastUpdated,
+            lastError: snapshot.lastError,
+            marketStatus: snapshot.marketStatus
+          });
+        }
+      } catch {
       }
     }
-    onStorageChanged((changes) => {
-      if (changes.settings) {
-        float.update({ settings: changes.settings });
-      }
-      if (changes.watchlist) {
-        float.update({ watchlist: changes.watchlist });
-      }
-      if (changes.quoteSnapshot) {
-        float.update({
-          quotes: changes.quoteSnapshot.quotes,
-          lastUpdated: changes.quoteSnapshot.lastUpdated,
-          lastError: changes.quoteSnapshot.lastError,
-          marketStatus: changes.quoteSnapshot.marketStatus
-        });
-      }
-    });
-    chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === "QUOTES_UPDATED") {
-        float.update({
-          quotes: message.quotes ?? [],
-          lastUpdated: message.lastUpdated ?? null,
-          lastError: message.lastError ?? null,
-          marketStatus: message.marketStatus ?? "unknown"
-        });
-      }
-      if (message?.type === "STATE_UPDATED" && message.state) {
-        float.applyState(message.state);
-        float.update({
-          quotes: message.quotes ?? [],
-          lastUpdated: message.lastUpdated ?? null,
-          lastError: message.lastError ?? null,
-          marketStatus: message.marketStatus ?? "unknown"
-        });
-      }
-      if (message?.type === "SETTINGS_UPDATED" && message.settings) {
-        float.update({ settings: message.settings });
-      }
-    });
+    try {
+      onStorageChanged((changes) => {
+        if (!extensionAlive()) return;
+        if (changes.settings) {
+          float.update({ settings: changes.settings });
+        }
+        if (changes.watchlist) {
+          float.update({ watchlist: changes.watchlist });
+        }
+        if (changes.quoteSnapshot) {
+          float.update({
+            quotes: changes.quoteSnapshot.quotes,
+            lastUpdated: changes.quoteSnapshot.lastUpdated,
+            lastError: changes.quoteSnapshot.lastError,
+            marketStatus: changes.quoteSnapshot.marketStatus
+          });
+        }
+      });
+    } catch {
+    }
+    try {
+      chrome.runtime.onMessage.addListener((message) => {
+        if (!extensionAlive()) return;
+        if (message?.type === "QUOTES_UPDATED") {
+          float.update({
+            quotes: message.quotes ?? [],
+            lastUpdated: message.lastUpdated ?? null,
+            lastError: message.lastError ?? null,
+            marketStatus: message.marketStatus ?? "unknown"
+          });
+        }
+        if (message?.type === "STATE_UPDATED" && message.state) {
+          float.applyState(message.state);
+          float.update({
+            quotes: message.quotes ?? [],
+            lastUpdated: message.lastUpdated ?? null,
+            lastError: message.lastError ?? null,
+            marketStatus: message.marketStatus ?? "unknown"
+          });
+        }
+        if (message?.type === "SETTINGS_UPDATED" && message.settings) {
+          float.update({ settings: message.settings });
+        }
+      });
+    } catch {
+    }
     let lastVisible = null;
     const reportVisibility = (next) => {
       if (lastVisible === next) return;
       lastVisible = next;
-      void chrome.runtime.sendMessage({
+      void safeSend({
         type: "PAGE_VISIBILITY",
         visible: next
       });
@@ -487,6 +524,7 @@
     reportVisibility(document.visibilityState === "visible");
     window.addEventListener("pagehide", () => reportVisibility(false));
   }
-  void main();
+  void main().catch(() => {
+  });
 })();
 //# sourceMappingURL=content.js.map

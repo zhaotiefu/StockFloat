@@ -89,23 +89,28 @@ export function onStorageChanged(
   }) => void
 ): void {
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    const payload: {
-      watchlist?: WatchStock[];
-      settings?: AppSettings;
-      quoteSnapshot?: QuoteSnapshot;
-    } = {};
-    if (changes.watchlist) {
-      payload.watchlist = changes.watchlist.newValue as WatchStock[];
-    }
-    if (changes.settings) {
-      payload.settings = mergeSettings(changes.settings.newValue as AppSettings);
-    }
-    if (changes.quoteSnapshot) {
-      payload.quoteSnapshot = changes.quoteSnapshot.newValue as QuoteSnapshot;
-    }
-    if (payload.watchlist || payload.settings || payload.quoteSnapshot) {
-      listener(payload);
+    try {
+      if (!chrome.runtime?.id) return;
+      if (area !== "local") return;
+      const payload: {
+        watchlist?: WatchStock[];
+        settings?: AppSettings;
+        quoteSnapshot?: QuoteSnapshot;
+      } = {};
+      if (changes.watchlist) {
+        payload.watchlist = changes.watchlist.newValue as WatchStock[];
+      }
+      if (changes.settings) {
+        payload.settings = mergeSettings(changes.settings.newValue as AppSettings);
+      }
+      if (changes.quoteSnapshot) {
+        payload.quoteSnapshot = changes.quoteSnapshot.newValue as QuoteSnapshot;
+      }
+      if (payload.watchlist || payload.settings || payload.quoteSnapshot) {
+        listener(payload);
+      }
+    } catch {
+      // Stale content script after extension reload.
     }
   });
 }

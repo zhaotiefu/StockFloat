@@ -307,6 +307,7 @@ export class FloatWindow {
 
   private async send(message: Record<string, unknown>): Promise<void> {
     try {
+      if (!chrome.runtime?.id) return;
       await chrome.runtime.sendMessage(message);
     } catch {
       // Extension context invalidated on reload.
