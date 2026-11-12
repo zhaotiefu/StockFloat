@@ -1,0 +1,264 @@
+:host {
+  all: initial;
+}
+
+.sf-root {
+  position: fixed;
+  z-index: 2147483646;
+  width: 300px;
+  max-height: 400px;
+  min-height: 90px;
+  box-sizing: border-box;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #e8eef7;
+  pointer-events: none;
+}
+
+.sf-root * {
+  box-sizing: border-box;
+}
+
+.sf-panel,
+.sf-mini {
+  pointer-events: auto;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.sf-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 400px;
+  background: rgba(18, 24, 38, var(--sf-alpha, 0.85));
+}
+
+.sf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sf-header:active {
+  cursor: grabbing;
+}
+
+.sf-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #9fb2c9;
+}
+
+.sf-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sf-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #9fb2c9;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sf-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eef7;
+}
+
+.sf-settings {
+  display: none;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.sf-settings.open {
+  display: block;
+}
+
+.sf-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #c5d2e3;
+  font-size: 12px;
+}
+
+.sf-settings input[type="range"] {
+  width: 140px;
+  accent-color: #2ecca8;
+}
+
+.sf-list {
+  overflow-y: auto;
+  max-height: 280px;
+  padding: 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.sf-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 12px;
+  min-height: 32px;
+}
+
+.sf-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #eef3fa;
+  font-weight: 500;
+}
+
+.sf-symbol {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  color: #7f91a8;
+  font-weight: 400;
+}
+
+.sf-price,
+.sf-change {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sf-price {
+  color: #d7e2f0;
+  min-width: 58px;
+}
+
+.sf-change {
+  min-width: 64px;
+  font-weight: 600;
+}
+
+.sf-up {
+  color: #ff5a5a;
+}
+
+.sf-down {
+  color: #2fce7c;
+}
+
+.sf-flat {
+  color: #8b9bb0;
+}
+
+.sf-empty,
+.sf-error {
+  padding: 16px 12px;
+  text-align: center;
+  color: #8b9bb0;
+  font-size: 12px;
+}
+
+.sf-error {
+  color: #ffb454;
+}
+
+.sf-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #7f91a8;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.sf-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sf-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ecca8;
+  display: inline-block;
+}
+
+.sf-status-dot.warn {
+  background: #ffb454;
+}
+
+.sf-status-dot.off {
+  background: #6b7c91;
+}
+
+.sf-refresh-btn {
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #c5d2e3;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sf-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sf-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: rgba(18, 24, 38, var(--sf-alpha, 0.85));
+  color: #e8eef7;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  user-select: none;
+}
+
+.sf-mini .sf-change {
+  font-weight: 700;
+}
+
+.sf-hidden {
+  display: none !important;
+}

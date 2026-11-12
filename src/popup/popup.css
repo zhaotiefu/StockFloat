@@ -1,0 +1,248 @@
+:root {
+  color-scheme: dark;
+  --bg: #101722;
+  --panel: #182233;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #e8eef7;
+  --muted: #8b9bb0;
+  --accent: #2ecca8;
+  --danger: #ff6b6b;
+  --up: #ff5a5a;
+  --down: #2fce7c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 360px;
+  background: radial-gradient(120% 80% at 100% 0%, #1b2a3d 0%, var(--bg) 55%);
+  color: var(--text);
+  font: 13px/1.4 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.app {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #9fb2c9;
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.card {
+  background: rgba(24, 34, 51, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.add-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+input[type="text"],
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #0f1622;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+input[type="text"]:focus,
+select:focus {
+  border-color: rgba(46, 204, 168, 0.55);
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #04231b;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+.ghost-btn,
+.secondary-btn {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.secondary-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.watchlist {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.watchlist li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+}
+
+.watchlist li:hover {
+  border-color: var(--line);
+}
+
+.meta .name {
+  font-weight: 650;
+}
+
+.meta .code {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.quote {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.quote .price {
+  color: #d7e2f0;
+}
+
+.quote .chg {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.up {
+  color: var(--up);
+}
+
+.down {
+  color: var(--down);
+}
+
+.flat {
+  color: var(--muted);
+}
+
+.item-actions {
+  display: flex;
+  gap: 4px;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.item-actions button {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.item-actions .danger {
+  color: #ffd0d0;
+  background: rgba(255, 90, 90, 0.12);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.row span {
+  color: #d5deea;
+}
+
+.row em {
+  font-style: normal;
+  color: var(--accent);
+  margin-left: 6px;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+input[type="range"] {
+  width: 140px;
+  accent-color: var(--accent);
+}
+
+.hint,
+.error {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.error {
+  color: #ffb4b4;
+}
+
+.footer {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 2px 2px;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "stock-float",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stock Float — lightweight A-share floating quote Chrome extension",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}
