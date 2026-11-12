@@ -537,18 +537,28 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	f.addEntry.SetPlaceHolder("代码 601318")
 	f.addErrLbl = widget.NewLabel("")
 	f.addErrLbl.Hide()
-	addBtn := widget.NewButton("添加", func() {
-		msg := f.addSymbol(f.addEntry.Text)
+	doAdd := func() {
+		sym := strings.TrimSpace(f.addEntry.Text)
+		if sym == "" {
+			f.addErrLbl.SetText("请先输入 6 位股票代码")
+			f.addErrLbl.Show()
+			return
+		}
+		msg := f.addSymbol(sym)
 		if msg != "" {
 			f.addErrLbl.SetText(msg)
 			f.addErrLbl.Show()
 			return
 		}
-		f.addErrLbl.Hide()
+		f.addErrLbl.SetText("已添加 " + sym)
+		f.addErrLbl.Show()
 		f.addEntry.SetText("")
-		f.requestUI()
+		f.rebuildList()
 		go f.refreshQuotes(true)
-	})
+	}
+	f.addEntry.OnSubmitted = func(string) { doAdd() }
+	addBtn := widget.NewButton("添加", doAdd)
+	addBtn.Importance = widget.HighImportance
 	addRow := container.NewBorder(nil, nil, nil, addBtn, f.addEntry)
 
 	f.mu.Lock()
@@ -728,18 +738,27 @@ func (f *floatUI) openSettings() {
 	}
 
 	addBtn := widget.NewButton("添加", func() {
-		msg := f.addSymbol(symbolEntry.Text)
+		sym := strings.TrimSpace(symbolEntry.Text)
+		if sym == "" {
+			errLbl.SetText("请先输入 6 位股票代码")
+			errLbl.Show()
+			return
+		}
+		msg := f.addSymbol(sym)
 		if msg != "" {
 			errLbl.SetText(msg)
 			errLbl.Show()
 			return
 		}
-		errLbl.Hide()
+		errLbl.SetText("已添加 " + sym)
+		errLbl.Show()
 		symbolEntry.SetText("")
 		watchList.Refresh()
 		f.requestUI()
 		go f.refreshQuotes(true)
 	})
+	symbolEntry.OnSubmitted = func(string) { addBtn.OnTapped() }
+	addBtn.Importance = widget.HighImportance
 
 	showBtn := widget.NewButton("显示悬浮窗", func() {
 		f.mu.Lock()
