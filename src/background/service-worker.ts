@@ -34,11 +34,13 @@ let liveTimer: ReturnType<typeof setTimeout> | null = null;
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
+  await ensureContentScriptsOnOpenTabs();
   await scheduleAlarm();
   await refreshQuotes("startup");
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await ensureContentScriptsOnOpenTabs();
   await scheduleAlarm();
   await refreshQuotes("startup");
 });
@@ -149,6 +151,9 @@ async function handleMessage(
     case "UPDATE_SETTINGS": {
       const settings = await updateSettings(message.patch);
       const state = await loadState();
+      if (message.patch.enabled === true || message.patch.minimized === false) {
+        await ensureContentScriptsOnOpenTabs();
+      }
       await scheduleAlarm();
       await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
       return {
@@ -170,7 +175,8 @@ async function handleMessage(
     }
     case "TOGGLE_VISIBLE":
     case "SHOW_FLOAT": {
-      const settings = await updateSettings({ enabled: true });
+      const settings = await updateSettings({ enabled: true, minimized: false });
+      await ensureContentScriptsOnOpenTabs();
       await scheduleAlarm();
       await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
       return { ok: true, state: { ...(await loadState()), settings } };
@@ -412,7 +418,30 @@ async function notifyExtensionPages(payload: Record<string, unknown>): Promise<v
   }
 }
 
+/** Inject float into already-open http(s) tabs (needed after install / enable). */
+async function ensureContentScriptsOnOpenTabs(): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (!tab.id) return;
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ["content/content.js"],
+          });
+        } catch {
+          // Restricted pages / discarded tabs.
+        }
+      })
+    );
+  } catch {
+    // scripting/tabs unavailable
+  }
+}
+
 // Warm state on worker boot.
+void ensureContentScriptsOnOpenTabs();
 void scheduleAlarm();
 void refreshQuotes("boot");
 

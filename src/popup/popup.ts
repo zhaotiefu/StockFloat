@@ -138,7 +138,13 @@ els.addForm.addEventListener("submit", async (e) => {
 });
 
 els.enabled.addEventListener("change", async () => {
-  await patchSettings({ enabled: els.enabled.checked });
+  if (els.enabled.checked) {
+    // Force show + inject into open tabs.
+    await send({ type: "SHOW_FLOAT" });
+    await refreshView();
+  } else {
+    await patchSettings({ enabled: false });
+  }
 });
 els.opacity.addEventListener("input", () => {
   els.opacityValue.textContent = `${els.opacity.value}%`;
@@ -148,7 +154,7 @@ els.opacity.addEventListener("change", async () => {
 });
 els.refreshInterval.addEventListener("change", async () => {
   await patchSettings({
-    refreshInterval: Number(els.refreshInterval.value) as 5 | 10 | 30,
+    refreshInterval: Number(els.refreshInterval.value) as 2 | 5 | 10 | 30,
   });
 });
 els.showSymbol.addEventListener("change", async () => {

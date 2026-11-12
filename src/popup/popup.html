@@ -40,6 +40,10 @@
           <span>悬浮窗启用</span>
           <input id="enabled" type="checkbox" />
         </label>
+        <p class="hint page-tip">
+          开启后会在当前已打开的普通网页右下角显示。若仍没有，请刷新该网页。
+          <br />不支持 chrome://、扩展商店等内部页面。
+        </p>
         <label class="row">
           <span>透明度 <em id="opacityValue">85%</em></span>
           <input id="opacity" type="range" min="20" max="100" step="1" />
@@ -47,6 +51,7 @@
         <label class="row">
           <span>刷新间隔</span>
           <select id="refreshInterval">
+            <option value="2">2 秒（推荐盯盘）</option>
             <option value="5">5 秒</option>
             <option value="10">10 秒</option>
             <option value="30">30 秒</option>

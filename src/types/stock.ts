@@ -25,7 +25,7 @@ export interface WatchStock {
   board: MarketBoard;
 }
 
-export type RefreshInterval = 5 | 10 | 30;
+export type RefreshInterval = 2 | 5 | 10 | 30;
 
 export interface FloatPosition {
   /** Offset from the right edge of the viewport (px). */
@@ -57,7 +57,7 @@ export const DEFAULT_POSITION: FloatPosition = {
 export const DEFAULT_SETTINGS: AppSettings = {
   enabled: true,
   opacity: 85,
-  refreshInterval: 5,
+  refreshInterval: 2,
   showSymbol: false,
   showUpdateTime: true,
   minimized: false,

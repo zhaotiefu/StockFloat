@@ -237,6 +237,15 @@ input[type="range"] {
   color: var(--muted);
 }
 
+.page-tip {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(46, 204, 168, 0.08);
+  border: 1px solid rgba(46, 204, 168, 0.18);
+  line-height: 1.45;
+}
+
 .error {
   color: #ffb4b4;
 }

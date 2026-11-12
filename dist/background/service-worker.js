@@ -207,7 +207,7 @@
   var DEFAULT_SETTINGS = {
     enabled: true,
     opacity: 85,
-    refreshInterval: 5,
+    refreshInterval: 2,
     showSymbol: false,
     showUpdateTime: true,
     minimized: false,
@@ -268,8 +268,8 @@
     };
     if (merged.opacity < 20) merged.opacity = 20;
     if (merged.opacity > 100) merged.opacity = 100;
-    if (![5, 10, 30].includes(merged.refreshInterval)) {
-      merged.refreshInterval = 5;
+    if (![2, 5, 10, 30].includes(merged.refreshInterval)) {
+      merged.refreshInterval = 2;
     }
     return merged;
   }
@@ -288,10 +288,12 @@
   var liveTimer = null;
   chrome.runtime.onInstalled.addListener(async () => {
     await loadState();
+    await ensureContentScriptsOnOpenTabs();
     await scheduleAlarm();
     await refreshQuotes("startup");
   });
   chrome.runtime.onStartup.addListener(async () => {
+    await ensureContentScriptsOnOpenTabs();
     await scheduleAlarm();
     await refreshQuotes("startup");
   });
@@ -392,6 +394,9 @@
       case "UPDATE_SETTINGS": {
         const settings = await updateSettings(message.patch);
         const state = await loadState();
+        if (message.patch.enabled === true || message.patch.minimized === false) {
+          await ensureContentScriptsOnOpenTabs();
+        }
         await scheduleAlarm();
         await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
         return {
@@ -413,7 +418,8 @@
       }
       case "TOGGLE_VISIBLE":
       case "SHOW_FLOAT": {
-        const settings = await updateSettings({ enabled: true });
+        const settings = await updateSettings({ enabled: true, minimized: false });
+        await ensureContentScriptsOnOpenTabs();
         await scheduleAlarm();
         await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
         return { ok: true, state: { ...await loadState(), settings } };
@@ -604,6 +610,25 @@
     } catch {
     }
   }
+  async function ensureContentScriptsOnOpenTabs() {
+    try {
+      const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+      await Promise.all(
+        tabs.map(async (tab) => {
+          if (!tab.id) return;
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ["content/content.js"]
+            });
+          } catch {
+          }
+        })
+      );
+    } catch {
+    }
+  }
+  void ensureContentScriptsOnOpenTabs();
   void scheduleAlarm();
   void refreshQuotes("boot");
 })();

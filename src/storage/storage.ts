@@ -65,8 +65,8 @@ function mergeSettings(partial?: Partial<AppSettings>): AppSettings {
 
   if (merged.opacity < 20) merged.opacity = 20;
   if (merged.opacity > 100) merged.opacity = 100;
-  if (![5, 10, 30].includes(merged.refreshInterval)) {
-    merged.refreshInterval = 5;
+  if (![2, 5, 10, 30].includes(merged.refreshInterval)) {
+    merged.refreshInterval = 2;
   }
 
   return merged;

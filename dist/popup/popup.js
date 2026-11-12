@@ -8,7 +8,7 @@
   var DEFAULT_SETTINGS = {
     enabled: true,
     opacity: 85,
-    refreshInterval: 5,
+    refreshInterval: 2,
     showSymbol: false,
     showUpdateTime: true,
     minimized: false,
@@ -189,7 +189,12 @@
     if (state) renderAll(res);
   });
   els.enabled.addEventListener("change", async () => {
-    await patchSettings({ enabled: els.enabled.checked });
+    if (els.enabled.checked) {
+      await send({ type: "SHOW_FLOAT" });
+      await refreshView();
+    } else {
+      await patchSettings({ enabled: false });
+    }
   });
   els.opacity.addEventListener("input", () => {
     els.opacityValue.textContent = `${els.opacity.value}%`;
