@@ -11,30 +11,37 @@ import (
 )
 
 var (
-	user32                       = syscall.NewLazyDLL("user32.dll")
-	procSetWindowPos              = user32.NewProc("SetWindowPos")
-	procSetWindowLongW            = user32.NewProc("SetWindowLongW")
-	procGetWindowLongW            = user32.NewProc("GetWindowLongW")
+	user32                        = syscall.NewLazyDLL("user32.dll")
+	procSetWindowPos               = user32.NewProc("SetWindowPos")
+	procSetWindowLongW             = user32.NewProc("SetWindowLongW")
+	procGetWindowLongW             = user32.NewProc("GetWindowLongW")
 	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
-	procGetWindowRect             = user32.NewProc("GetWindowRect")
-	procGetCursorPos              = user32.NewProc("GetCursorPos")
-	procGetSystemMetrics          = user32.NewProc("GetSystemMetrics")
-	procMoveWindow                = user32.NewProc("MoveWindow")
-	procIsWindowVisible           = user32.NewProc("IsWindowVisible")
+	procGetWindowRect              = user32.NewProc("GetWindowRect")
+	procGetCursorPos               = user32.NewProc("GetCursorPos")
+	procGetSystemMetrics           = user32.NewProc("GetSystemMetrics")
+	procMoveWindow                 = user32.NewProc("MoveWindow")
+	procIsWindowVisible            = user32.NewProc("IsWindowVisible")
 )
 
 const (
-	hwndTopMost    = ^uintptr(0) // HWND_TOPMOST (-1)
-	hwndNoTopMost  = ^uintptr(1) // HWND_NOTOPMOST (-2)
-	swpNoMove      = 0x0002
-	swpNoSize      = 0x0001
-	swpNoActivate  = 0x0010
-	swpShowWindow  = 0x0040
-	gwlExStyle     = uintptr(0xFFFFFFEC) // -20
-	wsExLayered    = 0x00080000
-	lwaAlpha       = 0x00000002
-	smCXScreen     = 0
-	smCYScreen     = 1
+	hwndTopMost   = ^uintptr(0) // HWND_TOPMOST (-1)
+	hwndNoTopMost = ^uintptr(1) // HWND_NOTOPMOST (-2)
+	swpNoMove     = 0x0002
+	swpNoSize     = 0x0001
+	swpNoActivate = 0x0010
+	swpShowWindow = 0x0040
+	swpFrameChanged = 0x0020
+	gwlStyle      = uintptr(0xFFFFFFF0) // -16
+	gwlExStyle    = uintptr(0xFFFFFFEC) // -20
+	wsCaption     = 0x00C00000
+	wsThickFrame  = 0x00040000
+	wsMinimizeBox = 0x00020000
+	wsMaximizeBox = 0x00010000
+	wsSysMenu     = 0x00080000
+	wsExLayered   = 0x00080000
+	lwaAlpha      = 0x00000002
+	smCXScreen    = 0
+	smCYScreen    = 1
 )
 
 type winRECT struct {
@@ -70,8 +77,8 @@ func setAlwaysOnTop(w fyne.Window, on bool) {
 }
 
 func setWindowOpacity(w fyne.Window, percent int) {
-	if percent < 10 {
-		percent = 10
+	if percent < 1 {
+		percent = 1
 	}
 	if percent > 100 {
 		percent = 100
@@ -81,6 +88,15 @@ func setWindowOpacity(w fyne.Window, percent int) {
 		style, _, _ := procGetWindowLongW.Call(hwnd, gwlExStyle)
 		_, _, _ = procSetWindowLongW.Call(hwnd, gwlExStyle, style|wsExLayered)
 		_, _, _ = procSetLayeredWindowAttributes.Call(hwnd, 0, uintptr(alpha), uintptr(lwaAlpha))
+	})
+}
+
+func setFrameless(w fyne.Window) {
+	withHWND(w, func(hwnd uintptr) {
+		style, _, _ := procGetWindowLongW.Call(hwnd, gwlStyle)
+		style &^= uintptr(wsCaption | wsThickFrame | wsMinimizeBox | wsMaximizeBox | wsSysMenu)
+		_, _, _ = procSetWindowLongW.Call(hwnd, gwlStyle, style)
+		_, _, _ = procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, uintptr(swpNoMove|swpNoSize|swpNoActivate|swpFrameChanged|swpShowWindow))
 	})
 }
 

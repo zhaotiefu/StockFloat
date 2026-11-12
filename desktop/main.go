@@ -96,8 +96,8 @@ func normalizeSettings(s *Settings) {
 	}
 	if s.Opacity == 0 {
 		s.Opacity = 100
-	} else if s.Opacity < 10 {
-		s.Opacity = 10
+	} else if s.Opacity < 1 {
+		s.Opacity = 1
 	} else if s.Opacity > 100 {
 		s.Opacity = 100
 	}
@@ -105,7 +105,7 @@ func normalizeSettings(s *Settings) {
 		s.RowGap = 0
 	}
 	if s.RowGap > 2 {
-		s.RowGap = 2
+		s.RowGap = 0 // default tighter layout
 	}
 	if len(s.Watchlist) == 0 {
 		s.Watchlist = defaultData().Settings.Watchlist
@@ -287,6 +287,30 @@ func (lightTheme) Font(s fyne.TextStyle) fyne.Resource     { return theme.Defaul
 func (lightTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return theme.DefaultTheme().Icon(n) }
 func (lightTheme) Size(n fyne.ThemeSizeName) float32       { return theme.DefaultTheme().Size(n) }
 
+// darkFloatTheme is used only while simplified float mode is active.
+type darkFloatTheme struct{ lightTheme }
+
+func (darkFloatTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	switch n {
+	case theme.ColorNameBackground:
+		return color.NRGBA{R: 42, G: 46, B: 54, A: 255}
+	case theme.ColorNameForeground:
+		return color.NRGBA{R: 241, G: 245, B: 249, A: 255}
+	case theme.ColorNamePlaceHolder, theme.ColorNameDisabled:
+		return color.NRGBA{R: 148, G: 163, B: 184, A: 255}
+	case theme.ColorNameButton, theme.ColorNameInputBackground:
+		return color.NRGBA{R: 55, G: 60, B: 70, A: 255}
+	case theme.ColorNameHover:
+		return color.NRGBA{R: 70, G: 76, B: 88, A: 255}
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 94, G: 234, B: 212, A: 255}
+	case theme.ColorNameShadow:
+		return color.NRGBA{R: 0, G: 0, B: 0, A: 80}
+	default:
+		return (lightTheme{}).Color(n, v)
+	}
+}
+
 type edgeDock struct {
 	hidden bool
 	edge   string
@@ -337,6 +361,7 @@ func (f *floatUI) applyWindowChrome() {
 		onTop := f.data.Settings.AlwaysOnTop
 		opacity := f.data.Settings.Opacity
 		f.mu.Unlock()
+		setFrameless(f.win)
 		setAlwaysOnTop(f.win, onTop)
 		setWindowOpacity(f.win, opacity)
 		if f.topBtn != nil {
@@ -349,29 +374,26 @@ func (f *floatUI) applyWindowChrome() {
 	})
 }
 
-func formatQuoteLine(name, symbol string, showSymbol bool, q Quote) (line string, chgColor color.Color) {
-	if showSymbol && symbol != "" {
-		name = fmt.Sprintf("%s(%s)", name, symbol)
+func (f *floatUI) moveStock(from, to int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := len(f.data.Settings.Watchlist)
+	if from < 0 || to < 0 || from >= n || to >= n || from == to {
+		return false
 	}
-	price := "--"
-	if q.HasPrice {
-		price = fmt.Sprintf("%.2f", q.Price)
-	}
-	chg := "--"
-	chgColor = color.NRGBA{R: 107, G: 114, B: 128, A: 255}
-	if q.HasChange {
-		sign := ""
-		if q.ChangePercent > 0 {
-			sign = "+"
-			chgColor = color.NRGBA{R: 225, G: 29, B: 72, A: 255}
-		} else if q.ChangePercent < 0 {
-			chgColor = color.NRGBA{R: 5, G: 150, B: 105, A: 255}
+	f.data.Settings.Watchlist[from], f.data.Settings.Watchlist[to] = f.data.Settings.Watchlist[to], f.data.Settings.Watchlist[from]
+	_ = saveData(f.data)
+	if f.listBox != nil && from < len(f.listBox.Objects) && to < len(f.listBox.Objects) {
+		f.listBox.Objects[from], f.listBox.Objects[to] = f.listBox.Objects[to], f.listBox.Objects[from]
+		if a, ok := f.listBox.Objects[from].(*stockDragRow); ok {
+			a.index = from
 		}
-		chg = fmt.Sprintf("%s%.2f%%", sign, q.ChangePercent)
+		if b, ok := f.listBox.Objects[to].(*stockDragRow); ok {
+			b.index = to
+		}
+		f.listBox.Refresh()
 	}
-	// 紧凑单行：中国平安 53.33 (-0.15%)
-	line = fmt.Sprintf("%s  %s  (%s)", name, price, chg)
-	return line, chgColor
+	return true
 }
 
 func (f *floatUI) rebuildList() {
@@ -385,36 +407,55 @@ func (f *floatUI) rebuildList() {
 	for _, q := range f.quotes {
 		qmap[q.Symbol] = q
 	}
-	gap := f.data.Settings.RowGap
-	textSize := float32(13)
-	if gap == 0 {
-		textSize = 12
-	}
 	if len(f.data.Settings.Watchlist) == 0 {
-		empty := canvas.NewText("尚未添加自选股票", color.NRGBA{R: 107, G: 114, B: 128, A: 255})
-		empty.TextSize = textSize
-		items = append(items, empty)
+		items = append(items, widget.NewLabel("尚未添加自选股票"))
 	}
-	for _, s := range f.data.Settings.Watchlist {
+	for i, s := range f.data.Settings.Watchlist {
 		q := qmap[s.Symbol]
 		name := s.Name
 		if q.Name != "" {
 			name = q.Name
 		}
-		line, chgColor := formatQuoteLine(name, s.Symbol, f.data.Settings.ShowSymbol, q)
-		rowTxt := canvas.NewText(line, chgColor)
-		rowTxt.TextSize = textSize
-		rowTxt.TextStyle = fyne.TextStyle{Monospace: false}
-		switch gap {
-		case 0:
-			items = append(items, rowTxt)
-		case 1:
-			items = append(items, container.NewPadded(rowTxt))
-		default:
-			pad := canvas.NewRectangle(color.NRGBA{A: 0})
-			pad.SetMinSize(fyne.NewSize(1, 6))
-			items = append(items, container.NewVBox(rowTxt, pad))
+		leftText := name
+		if f.data.Settings.ShowSymbol {
+			leftText = fmt.Sprintf("%s %s", name, s.Symbol)
 		}
+		price := "--"
+		if q.HasPrice {
+			price = fmt.Sprintf("%.2f", q.Price)
+		}
+		chg := "--"
+		chgColor := color.NRGBA{R: 107, G: 114, B: 128, A: 255}
+		if q.HasChange {
+			sign := ""
+			if q.ChangePercent > 0 {
+				sign = "+"
+				chgColor = color.NRGBA{R: 225, G: 29, B: 72, A: 255}
+			} else if q.ChangePercent < 0 {
+				chgColor = color.NRGBA{R: 5, G: 150, B: 105, A: 255}
+			}
+			chg = fmt.Sprintf("%s%.2f%%", sign, q.ChangePercent)
+		}
+		simple := f.data.Settings.ChromeHidden
+		nameColor := color.NRGBA{R: 31, G: 41, B: 55, A: 255}
+		priceColor := color.NRGBA{R: 51, G: 65, B: 85, A: 255}
+		if simple {
+			nameColor = color.NRGBA{R: 240, G: 244, B: 248, A: 255}
+			priceColor = color.NRGBA{R: 226, G: 232, B: 240, A: 255}
+		}
+		nameLbl := canvas.NewText(leftText, nameColor)
+		nameLbl.TextSize = 12
+		priceLbl := canvas.NewText(price, priceColor)
+		priceLbl.TextSize = 12
+		priceLbl.Alignment = fyne.TextAlignTrailing
+		chgLbl := canvas.NewText(chg, chgColor)
+		chgLbl.TextSize = 12
+		chgLbl.TextStyle = fyne.TextStyle{Bold: true}
+		chgLbl.Alignment = fyne.TextAlignTrailing
+		// 3-column tight row: name | price | change%
+		right := container.NewHBox(priceLbl, widget.NewLabel("  "), chgLbl)
+		row := container.NewBorder(nil, nil, nameLbl, right)
+		items = append(items, newStockDragRow(f, i, row))
 	}
 	f.listBox.Objects = items
 	f.listBox.Refresh()
@@ -423,7 +464,9 @@ func (f *floatUI) rebuildList() {
 		f.clockLbl.SetText(cstNow().Format("15:04:05"))
 	}
 	if f.refreshLbl != nil {
-		if f.lastErr != "" {
+		if f.data.Settings.ChromeHidden {
+			// simple mode footer uses status as market state
+		} else if f.lastErr != "" {
 			f.refreshLbl.SetText("刷新失败")
 		} else if f.updatedAt.IsZero() {
 			f.refreshLbl.SetText("刷新 --:--:--")
@@ -432,44 +475,55 @@ func (f *floatUI) rebuildList() {
 		}
 	}
 	if f.statusLbl != nil && !f.refreshBusy {
-		if f.lastErr != "" {
+		if f.data.Settings.ChromeHidden {
+			f.statusLbl.SetText(marketStatusText())
+		} else if f.lastErr != "" {
 			f.statusLbl.SetText("异常")
 		} else {
 			f.statusLbl.SetText("自动刷新")
 		}
 	}
-	f.syncChromeVisibilityLocked()
 }
 
-func (f *floatUI) syncChromeVisibilityLocked() {
-	if f.chromeBox == nil || f.chromeBtn == nil {
-		return
+func (f *floatUI) applyModeContent() {
+	f.mu.Lock()
+	hidden := f.data.Settings.ChromeHidden
+	n := len(f.data.Settings.Watchlist)
+	f.mu.Unlock()
+	if n < 1 {
+		n = 1
 	}
-	if f.data.Settings.ChromeHidden {
-		f.chromeBox.Hide()
-		f.chromeBtn.SetText("功能")
+	if hidden {
+		f.app.Settings().SetTheme(&darkFloatTheme{})
+		f.win.Resize(fyne.NewSize(268, float32(64+n*22)))
+		f.win.SetContent(f.simpleContent())
 	} else {
-		f.chromeBox.Show()
-		f.chromeBtn.SetText("精简")
+		f.app.Settings().SetTheme(&lightTheme{})
+		f.win.Resize(fyne.NewSize(300, 420))
+		f.win.SetContent(f.fullContent())
 	}
+	f.rebuildList()
+	f.applyWindowChrome()
 }
 
 func (f *floatUI) toggleChrome() {
 	f.mu.Lock()
 	f.data.Settings.ChromeHidden = !f.data.Settings.ChromeHidden
-	hidden := f.data.Settings.ChromeHidden
-	n := len(f.data.Settings.Watchlist)
 	_ = saveData(f.data)
-	f.syncChromeVisibilityLocked()
 	f.mu.Unlock()
-	if hidden {
-		if n < 1 {
-			n = 1
-		}
-		f.win.Resize(fyne.NewSize(280, float32(72+n*18)))
-	} else {
-		f.win.Resize(fyne.NewSize(300, 420))
+	f.applyModeContent()
+}
+
+func marketStatusText() string {
+	now := cstNow()
+	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
+		return "已收盘"
 	}
+	hm := now.Hour()*100 + now.Minute()
+	if (hm >= 930 && hm <= 1130) || (hm >= 1300 && hm <= 1500) {
+		return "交易中"
+	}
+	return "已收盘"
 }
 
 func (f *floatUI) refreshQuotes(manual bool) {
@@ -550,19 +604,63 @@ func (f *floatUI) setMinimized(v bool) {
 		f.win.Resize(fyne.NewSize(180, 44))
 		f.win.SetContent(container.NewPadded(widget.NewButton("STOCK  点击恢复", func() {
 			f.setMinimized(false)
-			f.applyWindowChrome()
 		})))
 	} else {
-		f.win.Resize(fyne.NewSize(300, 420))
-		f.win.SetContent(f.fullContent())
-		f.rebuildList()
-		f.applyWindowChrome()
+		f.applyModeContent()
 	}
 }
 
-func (f *floatUI) fullContent() fyne.CanvasObject {
-	title := widget.NewLabelWithStyle("STOCK FLOAT", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+func (f *floatUI) simpleContent() fyne.CanvasObject {
+	bg := canvas.NewRectangle(color.NRGBA{R: 42, G: 46, B: 54, A: 250})
 
+	brand := canvas.NewText("STOCK FLOAT", color.NRGBA{R: 248, G: 250, B: 252, A: 255})
+	brand.TextSize = 11
+	brand.TextStyle = fyne.TextStyle{Bold: true}
+	brandBtn := widget.NewButton("", func() {
+		// Click brand to leave simplified mode.
+		f.mu.Lock()
+		f.data.Settings.ChromeHidden = false
+		_ = saveData(f.data)
+		f.mu.Unlock()
+		f.applyModeContent()
+	})
+	brandBtn.Importance = widget.LowImportance
+	brandWrap := container.NewStack(brandBtn, container.NewPadded(brand))
+
+	btnSettings := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() { f.openSettings() })
+	btnMin := widget.NewButton("─", func() { f.setMinimized(true) })
+	btnHide := widget.NewButton("×", func() {
+		f.win.Hide()
+		f.mu.Lock()
+		f.data.Settings.Enabled = false
+		_ = saveData(f.data)
+		f.mu.Unlock()
+	})
+	for _, b := range []*widget.Button{btnSettings, btnMin, btnHide} {
+		b.Importance = widget.LowImportance
+	}
+	header := container.NewBorder(nil, nil,
+		newDragHandle(f.win, brandWrap),
+		container.NewHBox(btnSettings, btnMin, btnHide),
+	)
+
+	f.listBox = container.New(&tightList{})
+	listPad := container.NewPadded(f.listBox)
+
+	f.clockLbl = widget.NewLabel(cstNow().Format("15:04:05"))
+	f.clockLbl.Importance = widget.LowImportance
+	f.statusLbl = widget.NewLabel(marketStatusText())
+	f.statusLbl.Importance = widget.LowImportance
+	f.refreshLbl = widget.NewLabel("") // unused in simple footer
+	btnRefresh := widget.NewButton("刷新", func() { go f.refreshQuotes(true) })
+	btnRefresh.Importance = widget.LowImportance
+	footer := container.NewBorder(nil, nil, f.clockLbl, container.NewHBox(f.statusLbl, btnRefresh))
+
+	body := container.NewBorder(container.NewPadded(header), container.NewPadded(footer), nil, nil, listPad)
+	return container.NewStack(bg, body)
+}
+
+func (f *floatUI) fullContent() fyne.CanvasObject {
 	btnSettings := widget.NewButton("设置", func() { f.openSettings() })
 	btnRefresh := widget.NewButton("刷新", func() { go f.refreshQuotes(true) })
 	f.topBtn = widget.NewButton("置顶", func() {
@@ -585,15 +683,25 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	f.mu.Unlock()
 
 	btnMin := widget.NewButton("收起", func() { f.setMinimized(true) })
+	btnHide := widget.NewButton("×", func() {
+		f.win.Hide()
+		f.mu.Lock()
+		f.data.Settings.Enabled = false
+		_ = saveData(f.data)
+		f.mu.Unlock()
+	})
 	f.chromeBtn = widget.NewButton("精简", func() { f.toggleChrome() })
 
-	// Always-visible slim bar: title + chrome toggle + collapse
-	titleRow := container.NewBorder(nil, nil, title, container.NewHBox(f.chromeBtn, btnMin))
+	// No OS title bar / no brand title text. Drag the left strip to move window.
+	dragHint := canvas.NewText("≡", color.NRGBA{R: 148, G: 163, B: 184, A: 255})
+	dragHint.TextSize = 16
+	headerBtns := container.NewHBox(f.chromeBtn, btnMin, btnHide)
+	titleRow := container.NewBorder(nil, nil, newDragHandle(f.win, container.NewPadded(dragHint)), headerBtns)
 	actionRow := container.NewGridWithColumns(3, btnRefresh, f.topBtn, btnSettings)
 
-	f.listBox = container.NewVBox()
+	f.listBox = container.New(&tightList{})
 	scroll := container.NewVScroll(f.listBox)
-	scroll.SetMinSize(fyne.NewSize(260, 100))
+	scroll.SetMinSize(fyne.NewSize(260, 90))
 
 	f.addEntry = widget.NewEntry()
 	f.addEntry.SetPlaceHolder("代码后回车/点添加")
@@ -631,14 +739,16 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 
 	f.mu.Lock()
 	op := float64(f.data.Settings.Opacity)
-	gap := f.data.Settings.RowGap
 	f.mu.Unlock()
-	f.opacitySlide = widget.NewSlider(10, 100)
-	f.opacitySlide.Step = 5
+	f.opacitySlide = widget.NewSlider(1, 100)
+	f.opacitySlide.Step = 1
 	f.opacitySlide.SetValue(op)
 	opacityLbl := widget.NewLabel(fmt.Sprintf("%d%%", int(op)))
 	f.opacitySlide.OnChanged = func(v float64) {
 		pct := int(v)
+		if pct < 1 {
+			pct = 1
+		}
 		opacityLbl.SetText(fmt.Sprintf("%d%%", pct))
 		f.mu.Lock()
 		f.data.Settings.Opacity = pct
@@ -648,43 +758,19 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	}
 	opacityRow := container.NewBorder(nil, nil, widget.NewLabel("透明"), opacityLbl, f.opacitySlide)
 
-	gapSlide := widget.NewSlider(0, 2)
-	gapSlide.Step = 1
-	gapSlide.SetValue(float64(gap))
-	gapLbl := widget.NewLabel(map[int]string{0: "紧凑", 1: "适中", 2: "宽松"}[gap])
-	gapSlide.OnChanged = func(v float64) {
-		g := int(v + 0.5)
-		if g < 0 {
-			g = 0
-		}
-		if g > 2 {
-			g = 2
-		}
-		gapLbl.SetText(map[int]string{0: "紧凑", 1: "适中", 2: "宽松"}[g])
-		f.mu.Lock()
-		f.data.Settings.RowGap = g
-		_ = saveData(f.data)
-		f.mu.Unlock()
-		f.requestUI()
-	}
-	gapRow := container.NewBorder(nil, nil, widget.NewLabel("间距"), gapLbl, gapSlide)
-
 	f.clockLbl = widget.NewLabel(cstNow().Format("15:04:05"))
 	f.refreshLbl = widget.NewLabel("刷新 --:--:--")
 	f.statusLbl = widget.NewLabel("自动刷新")
 	footerLeft := container.NewHBox(f.clockLbl, widget.NewLabel("   "), f.refreshLbl)
 	footer := container.NewBorder(nil, nil, footerLeft, f.statusLbl)
 
-	f.chromeBox = container.NewVBox(actionRow, addRow, f.addErrLbl, opacityRow, gapRow)
-	f.mu.Lock()
-	f.syncChromeVisibilityLocked()
-	f.mu.Unlock()
+	f.chromeBox = container.NewVBox(actionRow, addRow, f.addErrLbl, opacityRow)
 
 	top := container.NewVBox(titleRow, f.chromeBox)
 	return container.NewBorder(
-		container.NewPadded(top),
-		container.NewPadded(footer),
-		nil, nil, container.NewPadded(scroll),
+		top,
+		footer,
+		nil, nil, scroll,
 	)
 }
 
@@ -763,7 +849,6 @@ func (f *floatUI) openSettings() {
 	curAlwaysTop := f.data.Settings.AlwaysOnTop
 	curEdgeHide := f.data.Settings.EdgeAutoHide
 	opVal := float64(f.data.Settings.Opacity)
-	curGap := f.data.Settings.RowGap
 	f.mu.Unlock()
 
 	interval := widget.NewSelect([]string{"2", "5", "10", "30"}, nil)
@@ -814,12 +899,15 @@ func (f *floatUI) openSettings() {
 		f.mu.Unlock()
 	}
 
-	opSlider := widget.NewSlider(10, 100)
-	opSlider.Step = 5
+	opSlider := widget.NewSlider(1, 100)
+	opSlider.Step = 1
 	opSlider.SetValue(opVal)
 	opLbl := widget.NewLabel(fmt.Sprintf("%d%%", int(opVal)))
 	opSlider.OnChanged = func(v float64) {
 		pct := int(v)
+		if pct < 1 {
+			pct = 1
+		}
 		opLbl.SetText(fmt.Sprintf("%d%%", pct))
 		f.mu.Lock()
 		f.data.Settings.Opacity = pct
@@ -829,23 +917,6 @@ func (f *floatUI) openSettings() {
 		if f.opacitySlide != nil {
 			f.opacitySlide.SetValue(float64(pct))
 		}
-	}
-
-	gapSel := widget.NewSelect([]string{"紧凑", "适中", "宽松"}, nil)
-	gapSel.SetSelected(map[int]string{0: "紧凑", 1: "适中", 2: "宽松"}[curGap])
-	gapSel.OnChanged = func(v string) {
-		g := 0
-		switch v {
-		case "适中":
-			g = 1
-		case "宽松":
-			g = 2
-		}
-		f.mu.Lock()
-		f.data.Settings.RowGap = g
-		_ = saveData(f.data)
-		f.mu.Unlock()
-		f.requestUI()
 	}
 
 	addBtn := widget.NewButton("添加", func() {
@@ -899,10 +970,9 @@ func (f *floatUI) openSettings() {
 		showSym,
 		alwaysTop,
 		edgeHide,
-		container.NewBorder(nil, nil, widget.NewLabel("透明度(10%-100%)"), opLbl, opSlider),
-		container.NewBorder(nil, nil, widget.NewLabel("股票行间距"), gapSel),
+		container.NewBorder(nil, nil, widget.NewLabel("透明度(1%-100%)"), opLbl, opSlider),
 		container.NewGridWithColumns(2, showBtn, hideBtn),
-		widget.NewLabel("提示：悬浮窗点「精简」可隐藏上方功能区。置顶/透明度/贴边隐藏在 Windows 下生效。"),
+		widget.NewLabel("提示：无标题栏，顶部「⋮⋮ 拖动」可移动窗口；股票行可拖拽排序；「精简」隐藏上方功能。"),
 	)
 	w.SetContent(container.NewPadded(form))
 	w.SetOnClosed(func() { f.settingsWin = nil })
@@ -1045,8 +1115,7 @@ func main() {
 		_ = saveData(ui.data)
 		ui.mu.Unlock()
 	})
-	w.SetContent(ui.fullContent())
-	ui.rebuildList()
+	ui.applyModeContent()
 
 	go func() {
 		t := time.NewTicker(1 * time.Second)
