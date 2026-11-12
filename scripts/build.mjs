@@ -10,12 +10,13 @@ const watch = process.argv.includes("--watch");
 
 function copyStatic() {
   mkdirSync(join(dist, "popup"), { recursive: true });
+  mkdirSync(join(dist, "panel"), { recursive: true });
   mkdirSync(join(dist, "assets", "icons"), { recursive: true });
-  mkdirSync(join(dist, "content"), { recursive: true });
 
   cpSync(join(root, "src/popup/popup.html"), join(dist, "popup/popup.html"));
   cpSync(join(root, "src/popup/popup.css"), join(dist, "popup/popup.css"));
-  cpSync(join(root, "src/content/float.css"), join(dist, "content/float.css"));
+  cpSync(join(root, "src/panel/panel.html"), join(dist, "panel/panel.html"));
+  cpSync(join(root, "src/panel/panel.css"), join(dist, "panel/panel.css"));
   cpSync(join(root, "assets/icons"), join(dist, "assets/icons"), { recursive: true });
 
   const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
@@ -44,8 +45,8 @@ async function build() {
     }),
     esbuild.context({
       ...common,
-      entryPoints: [join(root, "src/content/content.ts")],
-      outfile: join(dist, "content/content.js"),
+      entryPoints: [join(root, "src/panel/panel.ts")],
+      outfile: join(dist, "panel/panel.js"),
       platform: "browser",
     }),
     esbuild.context({
@@ -60,10 +61,12 @@ async function build() {
     await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log("Watching for changes…");
   } else {
-    await Promise.all(contexts.map(async (ctx) => {
-      await ctx.rebuild();
-      await ctx.dispose();
-    }));
+    await Promise.all(
+      contexts.map(async (ctx) => {
+        await ctx.rebuild();
+        await ctx.dispose();
+      })
+    );
     console.log("Build complete → dist/");
   }
 }

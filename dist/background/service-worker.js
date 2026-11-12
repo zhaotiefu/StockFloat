@@ -206,12 +206,13 @@
   };
   var DEFAULT_SETTINGS = {
     enabled: true,
-    opacity: 85,
+    opacity: 92,
     refreshInterval: 2,
     showSymbol: false,
     showUpdateTime: true,
     minimized: false,
-    position: { ...DEFAULT_POSITION }
+    position: { ...DEFAULT_POSITION },
+    panelBounds: null
   };
   var DEFAULT_WATCHLIST = [
     { symbol: "601318", name: "\u4E2D\u56FD\u5E73\u5B89", board: "SH" },
@@ -264,7 +265,8 @@
     const merged = {
       ...DEFAULT_SETTINGS,
       ...partial ?? {},
-      position: normalizePosition(partial?.position ?? DEFAULT_SETTINGS.position)
+      position: normalizePosition(partial?.position ?? DEFAULT_SETTINGS.position),
+      panelBounds: partial?.panelBounds ?? DEFAULT_SETTINGS.panelBounds
     };
     if (merged.opacity < 20) merged.opacity = 20;
     if (merged.opacity > 100) merged.opacity = 100;
@@ -286,14 +288,15 @@
   var visibleTabs = /* @__PURE__ */ new Set();
   var refreshInFlight = null;
   var liveTimer = null;
+  var panelWindowId = null;
   chrome.runtime.onInstalled.addListener(async () => {
     await loadState();
-    await ensureContentScriptsOnOpenTabs();
+    await syncPanelWindow();
     await scheduleAlarm();
     await refreshQuotes("startup");
   });
   chrome.runtime.onStartup.addListener(async () => {
-    await ensureContentScriptsOnOpenTabs();
+    await syncPanelWindow();
     await scheduleAlarm();
     await refreshQuotes("startup");
   });
@@ -314,9 +317,21 @@
       void scheduleAlarm();
     }
   });
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (panelWindowId === windowId) {
+      panelWindowId = null;
+      void updateSettings({ enabled: false }).then(async (settings) => {
+        await scheduleAlarm();
+        await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
+      });
+    }
+  });
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== "local") return;
     if (changes.settings || changes.watchlist) {
+      if (changes.settings) {
+        await syncPanelWindow();
+      }
       await scheduleAlarm();
       await broadcastState();
       if (changes.watchlist) {
@@ -394,9 +409,7 @@
       case "UPDATE_SETTINGS": {
         const settings = await updateSettings(message.patch);
         const state = await loadState();
-        if (message.patch.enabled === true || message.patch.minimized === false) {
-          await ensureContentScriptsOnOpenTabs();
-        }
+        await syncPanelWindow();
         await scheduleAlarm();
         await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
         return {
@@ -416,16 +429,25 @@
           quotes: cachedQuotes
         };
       }
+      case "SET_PANEL_BOUNDS": {
+        const settings = await updateSettings({ panelBounds: message.bounds });
+        return {
+          ok: true,
+          state: { ...await loadState(), settings },
+          quotes: cachedQuotes
+        };
+      }
       case "TOGGLE_VISIBLE":
       case "SHOW_FLOAT": {
         const settings = await updateSettings({ enabled: true, minimized: false });
-        await ensureContentScriptsOnOpenTabs();
+        await syncPanelWindow();
         await scheduleAlarm();
         await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
         return { ok: true, state: { ...await loadState(), settings } };
       }
       case "HIDE_FLOAT": {
         const settings = await updateSettings({ enabled: false });
+        await syncPanelWindow();
         await scheduleAlarm();
         await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
         return { ok: true, state: { ...await loadState(), settings } };
@@ -510,7 +532,7 @@
         await broadcastQuotes();
         return;
       }
-      if (!force && !state.settings.enabled && visibleTabs.size === 0) {
+      if (!force && !state.settings.enabled) {
         return;
       }
       if (!force && !isTradingSession(lastMarketStatus) && reason === "alarm" && lastUpdated !== null) {
@@ -555,7 +577,7 @@
     const base = state.settings.refreshInterval;
     restartLiveTimer(state.settings.refreshInterval, state.settings.enabled, trading);
     await chrome.alarms.clear(ALARM_REFRESH);
-    const delayInMinutes = !state.settings.enabled || visibleTabs.size === 0 || !trading ? 5 : 1;
+    const delayInMinutes = !state.settings.enabled || !trading ? 5 : 1;
     await chrome.alarms.create(ALARM_REFRESH, { delayInMinutes });
   }
   function restartLiveTimer(intervalSec, enabled, trading) {
@@ -563,7 +585,7 @@
       clearTimeout(liveTimer);
       liveTimer = null;
     }
-    if (!enabled || visibleTabs.size === 0) {
+    if (!enabled) {
       return;
     }
     const ms = (trading ? intervalSec : Math.max(intervalSec * 6, 60)) * 1e3;
@@ -610,25 +632,59 @@
     } catch {
     }
   }
-  async function ensureContentScriptsOnOpenTabs() {
-    try {
-      const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
-      await Promise.all(
-        tabs.map(async (tab) => {
-          if (!tab.id) return;
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              files: ["content/content.js"]
-            });
-          } catch {
-          }
-        })
-      );
-    } catch {
+  async function syncPanelWindow() {
+    const state = await loadState();
+    if (!state.settings.enabled) {
+      if (panelWindowId !== null) {
+        try {
+          await chrome.windows.remove(panelWindowId);
+        } catch {
+        }
+        panelWindowId = null;
+      }
+      return;
     }
+    if (panelWindowId !== null) {
+      try {
+        await chrome.windows.get(panelWindowId);
+        return;
+      } catch {
+        panelWindowId = null;
+      }
+    }
+    const bounds = resolvePanelBounds(state.settings.panelBounds, state.settings.minimized);
+    const win = await chrome.windows.create({
+      url: chrome.runtime.getURL("panel/panel.html"),
+      type: "popup",
+      focused: true,
+      width: bounds.width,
+      height: bounds.height,
+      left: bounds.left,
+      top: bounds.top
+    });
+    panelWindowId = win.id ?? null;
   }
-  void ensureContentScriptsOnOpenTabs();
+  function resolvePanelBounds(saved, minimized) {
+    const width = minimized ? 160 : 320;
+    const height = minimized ? 56 : 240;
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top) && Number.isFinite(saved.width) && Number.isFinite(saved.height)) {
+      return {
+        left: saved.left,
+        top: saved.top,
+        width: minimized ? width : Math.max(width, saved.width),
+        height: minimized ? height : Math.max(height, saved.height)
+      };
+    }
+    const screenW = 1440;
+    const screenH = 900;
+    return {
+      width,
+      height,
+      left: Math.max(20, screenW - width - 24),
+      top: Math.max(20, screenH - height - 48)
+    };
+  }
+  void syncPanelWindow();
   void scheduleAlarm();
   void refreshQuotes("boot");
 })();

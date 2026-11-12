@@ -7,12 +7,13 @@
   };
   var DEFAULT_SETTINGS = {
     enabled: true,
-    opacity: 85,
+    opacity: 92,
     refreshInterval: 2,
     showSymbol: false,
     showUpdateTime: true,
     minimized: false,
-    position: { ...DEFAULT_POSITION }
+    position: { ...DEFAULT_POSITION },
+    panelBounds: null
   };
   var MAX_WATCHLIST = 20;
 

@@ -1,0 +1,269 @@
+:root {
+  color-scheme: light;
+  --sf-bg: #ffffff;
+  --sf-text: #1f2937;
+  --sf-muted: #6b7280;
+  --sf-line: rgba(15, 23, 42, 0.08);
+  --sf-header: #f8fafc;
+  --sf-up: #e11d48;
+  --sf-down: #059669;
+  --sf-flat: #6b7280;
+  --sf-warn: #b45309;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 13px/1.35 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--sf-text);
+}
+
+.sf-root {
+  width: 100%;
+  height: 100%;
+}
+
+.sf-panel,
+.sf-mini {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--sf-line);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  background: rgba(255, 255, 255, var(--sf-alpha, 0.92));
+}
+
+.sf-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.sf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid var(--sf-line);
+  background: var(--sf-header);
+}
+
+.sf-header:active {
+  cursor: grabbing;
+}
+
+.sf-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--sf-muted);
+}
+
+.sf-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sf-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--sf-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
+}
+
+.sf-btn:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--sf-text);
+}
+
+.sf-settings {
+  display: none;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--sf-line);
+  background: #f8fafc;
+}
+
+.sf-settings.open {
+  display: block;
+}
+
+.sf-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--sf-text);
+  font-size: 12px;
+}
+
+.sf-settings input[type="range"] {
+  width: 140px;
+  accent-color: #0f766e;
+}
+
+.sf-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.sf-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 12px;
+  min-height: 32px;
+}
+
+.sf-row:hover {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.sf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sf-text);
+  font-weight: 600;
+}
+
+.sf-symbol {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--sf-muted);
+  font-weight: 400;
+}
+
+.sf-price,
+.sf-change {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sf-price {
+  color: #334155;
+  min-width: 58px;
+}
+
+.sf-change {
+  min-width: 64px;
+  font-weight: 700;
+}
+
+.sf-up {
+  color: var(--sf-up);
+}
+
+.sf-down {
+  color: var(--sf-down);
+}
+
+.sf-flat {
+  color: var(--sf-flat);
+}
+
+.sf-empty,
+.sf-error {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--sf-muted);
+  font-size: 12px;
+}
+
+.sf-error {
+  color: var(--sf-warn);
+}
+
+.sf-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px 9px;
+  border-top: 1px solid var(--sf-line);
+  color: var(--sf-muted);
+  font-size: 11px;
+  background: #f8fafc;
+}
+
+.sf-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sf-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0f766e;
+  display: inline-block;
+}
+
+.sf-status-dot.warn {
+  background: #d97706;
+}
+
+.sf-status-dot.off {
+  background: #94a3b8;
+}
+
+.sf-refresh-btn {
+  appearance: none;
+  border: 0;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--sf-text);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sf-refresh-btn:hover {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+.sf-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--sf-text);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  user-select: none;
+}
+
+.sf-hidden {
+  display: none !important;
+}

@@ -11,6 +11,7 @@ import {
   type AppSettings,
   type AppState,
   type MarketStatus,
+  type PanelBounds,
   type RuntimeMessage,
   type RuntimeResponse,
   type StockQuote,
@@ -31,16 +32,17 @@ let lastMarketStatus: MarketStatus = "unknown";
 const visibleTabs = new Set<number>();
 let refreshInFlight: Promise<void> | null = null;
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
+let panelWindowId: number | null = null;
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
-  await ensureContentScriptsOnOpenTabs();
+  await syncPanelWindow();
   await scheduleAlarm();
   await refreshQuotes("startup");
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await ensureContentScriptsOnOpenTabs();
+  await syncPanelWindow();
   await scheduleAlarm();
   await refreshQuotes("startup");
 });
@@ -67,9 +69,22 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (panelWindowId === windowId) {
+    panelWindowId = null;
+    void updateSettings({ enabled: false }).then(async (settings) => {
+      await scheduleAlarm();
+      await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
+    });
+  }
+});
+
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
   if (changes.settings || changes.watchlist) {
+    if (changes.settings) {
+      await syncPanelWindow();
+    }
     await scheduleAlarm();
     await broadcastState();
     if (changes.watchlist) {
@@ -151,9 +166,7 @@ async function handleMessage(
     case "UPDATE_SETTINGS": {
       const settings = await updateSettings(message.patch);
       const state = await loadState();
-      if (message.patch.enabled === true || message.patch.minimized === false) {
-        await ensureContentScriptsOnOpenTabs();
-      }
+      await syncPanelWindow();
       await scheduleAlarm();
       await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
       return {
@@ -173,16 +186,25 @@ async function handleMessage(
         quotes: cachedQuotes,
       };
     }
+    case "SET_PANEL_BOUNDS": {
+      const settings = await updateSettings({ panelBounds: message.bounds });
+      return {
+        ok: true,
+        state: { ...(await loadState()), settings },
+        quotes: cachedQuotes,
+      };
+    }
     case "TOGGLE_VISIBLE":
     case "SHOW_FLOAT": {
       const settings = await updateSettings({ enabled: true, minimized: false });
-      await ensureContentScriptsOnOpenTabs();
+      await syncPanelWindow();
       await scheduleAlarm();
       await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
       return { ok: true, state: { ...(await loadState()), settings } };
     }
     case "HIDE_FLOAT": {
       const settings = await updateSettings({ enabled: false });
+      await syncPanelWindow();
       await scheduleAlarm();
       await notifyExtensionPages({ type: "SETTINGS_UPDATED", settings });
       return { ok: true, state: { ...(await loadState()), settings } };
@@ -288,7 +310,7 @@ async function refreshQuotes(
     }
 
     // Skip high-frequency polling when float is disabled and not forced.
-    if (!force && !state.settings.enabled && visibleTabs.size === 0) {
+    if (!force && !state.settings.enabled) {
       return;
     }
 
@@ -345,13 +367,12 @@ async function scheduleAlarm(): Promise<void> {
   const trading = isTradingSession();
   const base = state.settings.refreshInterval;
 
-  // Prefer an in-worker timer while pages are visible (supports 5s interval).
-  // Keep a 1-minute alarm as wakeup fallback when the worker sleeps.
+  // Prefer an in-worker timer while float panel is enabled.
   restartLiveTimer(state.settings.refreshInterval, state.settings.enabled, trading);
 
   await chrome.alarms.clear(ALARM_REFRESH);
   const delayInMinutes =
-    !state.settings.enabled || visibleTabs.size === 0 || !trading ? 5 : 1;
+    !state.settings.enabled || !trading ? 5 : 1;
   await chrome.alarms.create(ALARM_REFRESH, { delayInMinutes });
 }
 
@@ -365,7 +386,7 @@ function restartLiveTimer(
     liveTimer = null;
   }
 
-  if (!enabled || visibleTabs.size === 0) {
+  if (!enabled) {
     return;
   }
 
@@ -418,30 +439,77 @@ async function notifyExtensionPages(payload: Record<string, unknown>): Promise<v
   }
 }
 
-/** Inject float into already-open http(s) tabs (needed after install / enable). */
-async function ensureContentScriptsOnOpenTabs(): Promise<void> {
-  try {
-    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
-    await Promise.all(
-      tabs.map(async (tab) => {
-        if (!tab.id) return;
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ["content/content.js"],
-          });
-        } catch {
-          // Restricted pages / discarded tabs.
-        }
-      })
-    );
-  } catch {
-    // scripting/tabs unavailable
+async function syncPanelWindow(): Promise<void> {
+  const state = await loadState();
+  if (!state.settings.enabled) {
+    if (panelWindowId !== null) {
+      try {
+        await chrome.windows.remove(panelWindowId);
+      } catch {
+        // already closed
+      }
+      panelWindowId = null;
+    }
+    return;
   }
+
+  if (panelWindowId !== null) {
+    try {
+      await chrome.windows.get(panelWindowId);
+      // Keep existing window; panel page reacts to storage/settings.
+      return;
+    } catch {
+      panelWindowId = null;
+    }
+  }
+
+  const bounds = resolvePanelBounds(state.settings.panelBounds, state.settings.minimized);
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL("panel/panel.html"),
+    type: "popup",
+    focused: true,
+    width: bounds.width,
+    height: bounds.height,
+    left: bounds.left,
+    top: bounds.top,
+  });
+  panelWindowId = win.id ?? null;
+}
+
+function resolvePanelBounds(
+  saved: PanelBounds | null | undefined,
+  minimized: boolean
+): PanelBounds {
+  const width = minimized ? 160 : 320;
+  const height = minimized ? 56 : 240;
+  if (
+    saved &&
+    Number.isFinite(saved.left) &&
+    Number.isFinite(saved.top) &&
+    Number.isFinite(saved.width) &&
+    Number.isFinite(saved.height)
+  ) {
+    return {
+      left: saved.left,
+      top: saved.top,
+      width: minimized ? width : Math.max(width, saved.width),
+      height: minimized ? height : Math.max(height, saved.height),
+    };
+  }
+
+  // Fallback: bottom-right of a common desktop size.
+  const screenW = 1440;
+  const screenH = 900;
+  return {
+    width,
+    height,
+    left: Math.max(20, screenW - width - 24),
+    top: Math.max(20, screenH - height - 48),
+  };
 }
 
 // Warm state on worker boot.
-void ensureContentScriptsOnOpenTabs();
+void syncPanelWindow();
 void scheduleAlarm();
 void refreshQuotes("boot");
 

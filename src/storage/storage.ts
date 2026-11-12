@@ -61,6 +61,7 @@ function mergeSettings(partial?: Partial<AppSettings>): AppSettings {
     ...DEFAULT_SETTINGS,
     ...(partial ?? {}),
     position: normalizePosition(partial?.position ?? DEFAULT_SETTINGS.position),
+    panelBounds: partial?.panelBounds ?? DEFAULT_SETTINGS.panelBounds,
   };
 
   if (merged.opacity < 20) merged.opacity = 20;

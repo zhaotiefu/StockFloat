@@ -34,6 +34,14 @@ export interface FloatPosition {
   bottom: number;
 }
 
+/** Absolute screen bounds for the standalone panel window. */
+export interface PanelBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface AppSettings {
   enabled: boolean;
   opacity: number;
@@ -42,6 +50,7 @@ export interface AppSettings {
   showUpdateTime: boolean;
   minimized: boolean;
   position: FloatPosition;
+  panelBounds: PanelBounds | null;
 }
 
 export interface AppState {
@@ -56,12 +65,13 @@ export const DEFAULT_POSITION: FloatPosition = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   enabled: true,
-  opacity: 85,
+  opacity: 92,
   refreshInterval: 2,
   showSymbol: false,
   showUpdateTime: true,
   minimized: false,
   position: { ...DEFAULT_POSITION },
+  panelBounds: null,
 };
 
 export const DEFAULT_WATCHLIST: WatchStock[] = [
@@ -82,6 +92,7 @@ export type RuntimeMessage =
   | { type: "MOVE_STOCK"; symbol: string; direction: "up" | "down" }
   | { type: "UPDATE_SETTINGS"; patch: Partial<AppSettings> }
   | { type: "SET_POSITION"; position: FloatPosition }
+  | { type: "SET_PANEL_BOUNDS"; bounds: PanelBounds }
   | { type: "TOGGLE_VISIBLE" }
   | { type: "SHOW_FLOAT" }
   | { type: "HIDE_FLOAT" }

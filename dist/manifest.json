@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Stock Float",
-  "version": "1.0.1",
-  "description": "轻量级 A 股行情悬浮窗 — 浏览网页时持续关注自选股价格变化。",
+  "version": "1.1.0",
+  "description": "轻量级 A 股行情悬浮窗 — 独立白色悬浮窗，任意页面可用。",
   "icons": {
     "16": "assets/icons/icon16.png",
     "32": "assets/icons/icon32.png",
@@ -21,39 +21,13 @@
   "background": {
     "service_worker": "background/service-worker.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "content/content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "permissions": [
     "storage",
     "alarms",
-    "scripting",
-    "tabs"
+    "windows"
   ],
   "host_permissions": [
     "https://qt.gtimg.cn/*",
-    "http://qt.gtimg.cn/*",
-    "http://*/*",
-    "https://*/*"
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "content/float.css"
-      ],
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ]
-    }
+    "http://qt.gtimg.cn/*"
   ]
 }
