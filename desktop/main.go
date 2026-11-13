@@ -51,6 +51,8 @@ type Settings struct {
 	ShowSymbol      bool         `json:"showSymbol"`
 	Opacity         int          `json:"opacity"` // 1-100, step 1%
 	AlwaysOnTop     bool         `json:"alwaysOnTop"`
+	WindowWidth     float32      `json:"windowWidth"`
+	WindowHeight    float32      `json:"windowHeight"`
 	Watchlist       []WatchStock `json:"watchlist"`
 }
 
@@ -75,6 +77,23 @@ func clampOpacity(v int) int {
 		return 100
 	}
 	return v
+}
+
+const (
+	defaultFloatW float32 = 400
+	defaultFloatH float32 = 360
+	minFloatW     float32 = 220
+	minFloatH     float32 = 120
+)
+
+func normalizeFloatSize(w, h float32) fyne.Size {
+	if w < minFloatW {
+		w = defaultFloatW
+	}
+	if h < minFloatH {
+		h = defaultFloatH
+	}
+	return fyne.NewSize(w, h)
 }
 
 func defaultData() AppData {
@@ -369,14 +388,24 @@ func (f *floatUI) rebuildList() {
 			chg = fmt.Sprintf("%s%.2f%%", sign, q.ChangePercent)
 		}
 		nameLbl := widget.NewLabel(leftText)
+		// Was 13. canvas.NewText digits render smaller than Label Chinese at the same
+		// TextSize, so use theme text + 4 to match the stock-name size.
+		textSize := float32(18)
+		if a := fyne.CurrentApp(); a != nil {
+			if s := a.Settings().Theme().Size(theme.SizeNameText); s > 0 {
+				textSize = s + 4
+			}
+		}
 		priceLbl := canvas.NewText(price, color.NRGBA{R: 51, G: 65, B: 85, A: 255})
-		priceLbl.TextSize = 13
+		priceLbl.TextSize = textSize
+		priceLbl.TextStyle = fyne.TextStyle{Bold: true}
 		priceLbl.Alignment = fyne.TextAlignTrailing
 		chgLbl := canvas.NewText(chg, chgColor)
-		chgLbl.TextSize = 13
+		chgLbl.TextSize = textSize
 		chgLbl.TextStyle = fyne.TextStyle{Bold: true}
 		chgLbl.Alignment = fyne.TextAlignTrailing
-		row := container.NewBorder(nil, nil, nameLbl, container.NewHBox(layout.NewSpacer(), priceLbl, widget.NewLabel("  "), chgLbl))
+		right := container.NewHBox(layout.NewSpacer(), priceLbl, canvas.NewText("  ", color.NRGBA{}), chgLbl)
+		row := container.NewBorder(nil, nil, nameLbl, right)
 		items = append(items, newStockDragRow(f, len(items), container.NewPadded(row)))
 	}
 	listBox.Objects = items
@@ -451,6 +480,31 @@ func (f *floatUI) applyOpacity() {
 	setWindowOpacity(f.win, op)
 }
 
+func (f *floatUI) rememberSize() {
+	if f.win == nil || f.minimized {
+		return
+	}
+	s := f.win.Canvas().Size()
+	if s.Width < minFloatW || s.Height < minFloatH {
+		return
+	}
+	f.mu.Lock()
+	if f.data.Settings.WindowWidth == s.Width && f.data.Settings.WindowHeight == s.Height {
+		f.mu.Unlock()
+		return
+	}
+	f.data.Settings.WindowWidth = s.Width
+	f.data.Settings.WindowHeight = s.Height
+	_ = saveData(f.data)
+	f.mu.Unlock()
+}
+
+func (f *floatUI) savedSize() fyne.Size {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return normalizeFloatSize(f.data.Settings.WindowWidth, f.data.Settings.WindowHeight)
+}
+
 func (f *floatUI) applyWindowFlags() {
 	f.mu.Lock()
 	top := f.data.Settings.AlwaysOnTop
@@ -462,6 +516,10 @@ func (f *floatUI) applyWindowFlags() {
 }
 
 func (f *floatUI) showFloat() {
+	// Keep the size the user last adjusted (including when already visible).
+	if !f.minimized {
+		f.rememberSize()
+	}
 	f.mu.Lock()
 	f.data.Settings.Enabled = true
 	_ = saveData(f.data)
@@ -475,12 +533,18 @@ func (f *floatUI) showFloat() {
 	go func() {
 		for _, d := range []time.Duration{250 * time.Millisecond, 700 * time.Millisecond} {
 			time.Sleep(d)
-			f.runOnUI(f.applyWindowFlags)
+			f.runOnUI(func() {
+				f.applyWindowFlags()
+				hideAuxiliaryTaskbarWindows()
+			})
 		}
 	}()
 }
 
 func (f *floatUI) setMinimized(v bool) {
+	if v && !f.minimized {
+		f.rememberSize()
+	}
 	f.minimized = v
 	if v {
 		f.win.Resize(fyne.NewSize(180, 48))
@@ -488,7 +552,7 @@ func (f *floatUI) setMinimized(v bool) {
 			f.setMinimized(false)
 		})))
 	} else {
-		f.win.Resize(fyne.NewSize(400, 360))
+		f.win.Resize(f.savedSize())
 		f.win.SetContent(f.fullContent())
 		f.rebuildList()
 	}
@@ -528,6 +592,7 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	btnSettings := widget.NewButton("设置", f.openSettings)
 	btnMin := widget.NewButton("缩小", func() { f.setMinimized(true) })
 	btnHide := widget.NewButton("隐藏", func() {
+		f.rememberSize()
 		f.win.Hide()
 		f.mu.Lock()
 		f.data.Settings.Enabled = false
@@ -546,7 +611,8 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	btnRefresh := widget.NewButton("刷新", func() { go f.refreshQuotes() })
 	header := container.NewBorder(nil, nil, title, container.NewHBox(btnSettings, btnMin, btnHide, btnCompact, btnLock))
 	f.listBox = container.NewVBox()
-	scroll := container.NewVScroll(f.listBox)
+	// No scrollbar: it covers quotes; resize the window to see more rows.
+	listArea := container.NewPadded(f.listBox)
 	timeLbl := newDblTapLabel("--:--:--", func() {
 		if f.compact {
 			f.setCompact(false)
@@ -557,14 +623,14 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 	footer := container.NewBorder(nil, nil, timeLbl, container.NewHBox(f.statusLbl, btnRefresh))
 	if f.compact {
 		// Hide everything above the stock list; double-click time to restore.
-		return container.NewBorder(nil, container.NewPadded(footer), nil, nil, scroll)
+		return container.NewBorder(nil, container.NewPadded(footer), nil, nil, listArea)
 	}
 	topPad := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 0})
 	topPad.SetMinSize(fyne.NewSize(1, 8))
 	return container.NewBorder(
 		container.NewVBox(topPad, container.NewPadded(header)),
 		container.NewPadded(footer),
-		nil, nil, scroll,
+		nil, nil, listArea,
 	)
 }
 
@@ -759,8 +825,9 @@ func main() {
 	ui := &floatUI{app: a, data: data, uiPulse: make(chan struct{}, 1)}
 	w := a.NewWindow(appTitle)
 	ui.win = w
-	w.Resize(fyne.NewSize(400, 360))
+	w.Resize(ui.savedSize())
 	w.SetCloseIntercept(func() {
+		ui.rememberSize()
 		w.Hide()
 		ui.mu.Lock()
 		ui.data.Settings.Enabled = false
@@ -817,6 +884,13 @@ func main() {
 		ui.runOnUI(ui.applyWindowFlags)
 		time.Sleep(500 * time.Millisecond)
 		ui.runOnUI(hideAuxiliaryTaskbarWindows)
+	}()
+	// Persist user-resized float size while the window stays open.
+	go func() {
+		for {
+			time.Sleep(800 * time.Millisecond)
+			ui.runOnUI(ui.rememberSize)
+		}
 	}()
 	a.Run()
 }

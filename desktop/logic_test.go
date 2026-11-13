@@ -82,6 +82,17 @@ func TestClampOpacity(t *testing.T) {
 	}
 }
 
+func TestNormalizeFloatSize(t *testing.T) {
+	s := normalizeFloatSize(0, 0)
+	if s.Width != defaultFloatW || s.Height != defaultFloatH {
+		t.Fatalf("expected defaults, got %#v", s)
+	}
+	s = normalizeFloatSize(520, 280)
+	if s.Width != 520 || s.Height != 280 {
+		t.Fatalf("expected preserved size, got %#v", s)
+	}
+}
+
 func TestMoveStockOrder(t *testing.T) {
 	ui := &floatUI{data: defaultData()}
 	if !ui.moveStock(0, 1) {

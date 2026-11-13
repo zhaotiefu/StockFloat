@@ -49,10 +49,11 @@ func hideAuxiliaryTaskbarWindows() {
 		return
 	}
 	setNetWMState(id, true, "_NET_WM_STATE_SKIP_TASKBAR")
+	_ = exec.Command("xdotool", "windowunmap", id).Run()
+	_ = exec.Command("xdotool", "set_window", "--name", "", id).Run()
 }
 
 func setNetWMState(id string, enable bool, atom string) {
-	// xprop -set replaces the whole list; merge with existing states first.
 	out, _ := exec.Command("xprop", "-id", id, "_NET_WM_STATE").Output()
 	line := strings.TrimSpace(string(out))
 	states := map[string]bool{}
