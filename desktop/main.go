@@ -27,6 +27,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"fyne.io/systray"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -49,6 +50,7 @@ type Settings struct {
 	RefreshInterval int          `json:"refreshInterval"`
 	ShowSymbol      bool         `json:"showSymbol"`
 	Opacity         int          `json:"opacity"` // 1-100, step 1%
+	AlwaysOnTop     bool         `json:"alwaysOnTop"`
 	Watchlist       []WatchStock `json:"watchlist"`
 }
 
@@ -449,6 +451,35 @@ func (f *floatUI) applyOpacity() {
 	setWindowOpacity(f.win, op)
 }
 
+func (f *floatUI) applyWindowFlags() {
+	f.mu.Lock()
+	top := f.data.Settings.AlwaysOnTop
+	f.mu.Unlock()
+	setSkipTaskbar(f.win, true)
+	setAlwaysOnTop(f.win, top)
+	f.applyOpacity()
+	hideAuxiliaryTaskbarWindows()
+}
+
+func (f *floatUI) showFloat() {
+	f.mu.Lock()
+	f.data.Settings.Enabled = true
+	_ = saveData(f.data)
+	f.mu.Unlock()
+	f.win.Show()
+	f.setMinimized(false)
+	f.applyWindowFlags()
+	f.win.RequestFocus()
+	// Native flags (skip-taskbar / topmost) need the window mapped; some WMs
+	// clear EWMH state on focus, so re-apply shortly after show.
+	go func() {
+		for _, d := range []time.Duration{250 * time.Millisecond, 700 * time.Millisecond} {
+			time.Sleep(d)
+			f.runOnUI(f.applyWindowFlags)
+		}
+	}()
+}
+
 func (f *floatUI) setMinimized(v bool) {
 	f.minimized = v
 	if v {
@@ -457,11 +488,23 @@ func (f *floatUI) setMinimized(v bool) {
 			f.setMinimized(false)
 		})))
 	} else {
-		f.win.Resize(fyne.NewSize(360, 360))
+		f.win.Resize(fyne.NewSize(400, 360))
 		f.win.SetContent(f.fullContent())
 		f.rebuildList()
 	}
-	f.applyOpacity()
+	f.applyWindowFlags()
+}
+
+func (f *floatUI) toggleLock() {
+	f.mu.Lock()
+	f.data.Settings.AlwaysOnTop = !f.data.Settings.AlwaysOnTop
+	_ = saveData(f.data)
+	f.mu.Unlock()
+	f.applyWindowFlags()
+	if !f.minimized && !f.compact {
+		f.win.SetContent(f.fullContent())
+		f.rebuildList()
+	}
 }
 
 func (f *floatUI) setCompact(v bool) {
@@ -477,7 +520,7 @@ func (f *floatUI) setCompact(v bool) {
 	}
 	f.win.SetContent(f.fullContent())
 	f.rebuildList()
-	f.applyOpacity()
+	f.applyWindowFlags()
 }
 
 func (f *floatUI) fullContent() fyne.CanvasObject {
@@ -492,8 +535,16 @@ func (f *floatUI) fullContent() fyne.CanvasObject {
 		f.mu.Unlock()
 	})
 	btnCompact := widget.NewButton("精简", func() { f.setCompact(true) })
+	f.mu.Lock()
+	locked := f.data.Settings.AlwaysOnTop
+	f.mu.Unlock()
+	lockLabel := "锁定"
+	if locked {
+		lockLabel = "解锁"
+	}
+	btnLock := widget.NewButton(lockLabel, f.toggleLock)
 	btnRefresh := widget.NewButton("刷新", func() { go f.refreshQuotes() })
-	header := container.NewBorder(nil, nil, title, container.NewHBox(btnSettings, btnMin, btnHide, btnCompact))
+	header := container.NewBorder(nil, nil, title, container.NewHBox(btnSettings, btnMin, btnHide, btnCompact, btnLock))
 	f.listBox = container.NewVBox()
 	scroll := container.NewVScroll(f.listBox)
 	timeLbl := newDblTapLabel("--:--:--", func() {
@@ -642,16 +693,7 @@ func (f *floatUI) openSettings() {
 	addBtn := widget.NewButton("添加", doAdd)
 	symbolEntry.OnSubmitted = func(string) { doAdd() }
 
-	showBtn := widget.NewButton("显示悬浮窗", func() {
-		f.mu.Lock()
-		f.data.Settings.Enabled = true
-		_ = saveData(f.data)
-		f.mu.Unlock()
-		f.win.Show()
-		f.setMinimized(false)
-		f.applyOpacity()
-		f.win.RequestFocus()
-	})
+	showBtn := widget.NewButton("显示悬浮窗", f.showFloat)
 
 	watchScroll := container.NewVScroll(watchBox)
 	watchScroll.SetMinSize(fyne.NewSize(360, 180))
@@ -669,7 +711,7 @@ func (f *floatUI) openSettings() {
 		opacityLbl,
 		opacity,
 		showBtn,
-		widget.NewLabel("托盘菜单可重新显示悬浮窗；配置在程序同目录 stockfloat-data.json"),
+		widget.NewLabel("托盘：左键显示悬浮窗，右键打开菜单；配置在程序同目录 stockfloat-data.json"),
 	)
 	w.SetContent(container.NewPadded(form))
 	w.SetOnClosed(func() {
@@ -678,8 +720,7 @@ func (f *floatUI) openSettings() {
 		enabled := f.data.Settings.Enabled
 		f.mu.Unlock()
 		if enabled {
-			f.win.Show()
-			f.setMinimized(false)
+			f.showFloat()
 		}
 	})
 	w.Show()
@@ -718,7 +759,7 @@ func main() {
 	ui := &floatUI{app: a, data: data, uiPulse: make(chan struct{}, 1)}
 	w := a.NewWindow(appTitle)
 	ui.win = w
-	w.Resize(fyne.NewSize(360, 360))
+	w.Resize(fyne.NewSize(400, 360))
 	w.SetCloseIntercept(func() {
 		w.Hide()
 		ui.mu.Lock()
@@ -737,20 +778,21 @@ func main() {
 	if desk, ok := a.(desktop.App); ok {
 		menu := fyne.NewMenu(appTitle,
 			fyne.NewMenuItem("显示悬浮窗", func() {
-				ui.mu.Lock()
-				ui.data.Settings.Enabled = true
-				_ = saveData(ui.data)
-				ui.mu.Unlock()
-				w.Show()
-				ui.setMinimized(false)
+				ui.runOnUI(ui.showFloat)
 			}),
-			fyne.NewMenuItem("设置", ui.openSettings),
+			fyne.NewMenuItem("设置", func() {
+				ui.runOnUI(ui.openSettings)
+			}),
 			fyne.NewMenuItem("打开数据目录", openDataDir),
 			fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("退出", func() { a.Quit() }),
 		)
 		desk.SetSystemTrayMenu(menu)
 		desk.SetSystemTrayIcon(theme.ComputerIcon())
+		// Left-click tray icon shows float; right-click keeps the menu (systray default).
+		systray.SetOnTapped(func() {
+			ui.runOnUI(ui.showFloat)
+		})
 	}
 
 	go func() {
@@ -772,7 +814,9 @@ func main() {
 	}
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		ui.runOnUI(ui.applyOpacity)
+		ui.runOnUI(ui.applyWindowFlags)
+		time.Sleep(500 * time.Millisecond)
+		ui.runOnUI(hideAuxiliaryTaskbarWindows)
 	}()
 	a.Run()
 }
