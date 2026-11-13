@@ -68,8 +68,28 @@ func TestDefaultData(t *testing.T) {
 	if !d.Settings.Enabled || d.Settings.RefreshInterval != 2 {
 		t.Fatalf("bad defaults: %+v", d.Settings)
 	}
+	if d.Settings.Opacity != 100 {
+		t.Fatalf("expected opacity 100, got %d", d.Settings.Opacity)
+	}
 	if len(d.Settings.Watchlist) != 4 {
 		t.Fatalf("expected 4 default stocks, got %d", len(d.Settings.Watchlist))
+	}
+}
+
+func TestClampOpacity(t *testing.T) {
+	if clampOpacity(0) != 1 || clampOpacity(1) != 1 || clampOpacity(50) != 50 || clampOpacity(150) != 100 {
+		t.Fatal("clampOpacity range failed")
+	}
+}
+
+func TestMoveStockOrder(t *testing.T) {
+	ui := &floatUI{data: defaultData()}
+	if !ui.moveStock(0, 1) {
+		t.Fatal("moveStock should succeed")
+	}
+	got := ui.data.Settings.Watchlist[0].Symbol
+	if got != "600519" {
+		t.Fatalf("expected 600519 first after swap, got %s", got)
 	}
 }
 
